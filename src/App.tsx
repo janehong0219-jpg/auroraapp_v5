@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AudioEngine } from './audio/AudioEngine'
 import { AudioAnalyzer } from './audio/Analyzer'
 import Visualizer, { type VisualizerHandle, type VisualizerTheme } from './visualizer/Visualizer'
+import { DiminuendoTrainer } from './components/DiminuendoTrainer'
 import { CameraView } from './components/CameraView'
 import { getNoteFromFrequency, type NoteData } from './utils/noteUtils'
 import { type EmbouchureMetrics } from './ai/embouchureLogic'
@@ -15,6 +16,8 @@ interface HistoryItem {
   pitchStability: number | null;
 }
 
+type AppMode = 'analysis' | 'trainer';
+
 function App() {
   const [isStarted, setIsStarted] = useState(false);
 
@@ -27,6 +30,7 @@ function App() {
 
   // Theme & UI
   const [theme, setTheme] = useState<VisualizerTheme>('aurora');
+  const [mode, setMode] = useState<AppMode>('analysis');
   const [showUsage, setShowUsage] = useState(true);
   const [sensitivity, setSensitivity] = useState(1.5);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
@@ -42,6 +46,7 @@ function App() {
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
   const visualizerRef = useRef<VisualizerHandle>(null);
   const [currentNote, setCurrentNote] = useState<NoteData | null>(null);
+  const [currentVolume, setCurrentVolume] = useState<number>(0);
   const [embouchureMetrics, setEmbouchureMetrics] = useState<EmbouchureMetrics | null>(null);
   const [harmonics, setHarmonics] = useState<{ f1: number, f2: number, f3: number, score: number } | null>(null);
   const [pitchStability, setPitchStability] = useState<number | null>(null);
@@ -73,8 +78,10 @@ function App() {
     try {
       if (!isStarted) {
         // Start Audio Context
-        await engineRef.current.init((data, pitch) => {
+        await engineRef.current.init((data, pitch, rms) => {
           if (!micEnabled) return;
+
+          if (rms !== undefined) setCurrentVolume(rms);
 
           if (analyzerRef.current && visualizerRef.current) {
             const magnitudes = analyzerRef.current.analyze(data);
@@ -268,6 +275,21 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 md:gap-3 w-full md:w-auto">
+            {/* Mode Switcher */}
+            <div className="flex bg-white/40 rounded-full p-1 backdrop-blur-md border border-white/30 mr-2">
+              <button
+                onClick={() => setMode('analysis')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${mode === 'analysis' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                分析模式
+              </button>
+              <button
+                onClick={() => setMode('trainer')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${mode === 'trainer' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                漸弱訓練
+              </button>
+            </div>
 
             {/* Sensitivity Slider */}
             <div className="flex items-center gap-2 bg-white/40 rounded-full px-4 py-2 backdrop-blur-md border border-white/30 mr-2">
@@ -390,29 +412,41 @@ function App() {
           {/* Left Column (8 cols) */}
           <div className="lg:col-span-8 flex flex-col gap-6 md:gap-8">
 
-            {/* Main Visualizer */}
+            {/* Main Visualizer or Trainer */}
             <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-2 shadow-sm relative group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none"></div>
 
               <div className="relative bg-white/40 rounded-[2rem] p-4 md:p-6 h-[18rem] md:h-[22rem]">
-                <div className="absolute top-4 md:top-6 left-6 md:left-8 z-10">
-                  <h2 className="text-xl font-bold text-slate-700">
-                    {theme === 'sunset' ? '日落頻譜' : theme === 'ocean' ? '海洋頻譜' : '極光頻譜'}
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    {theme === 'sunset' ? 'Geometric Sunset' : theme === 'ocean' ? 'Deep Ocean' : 'Harmonic Aurora'}
-                  </p>
-                </div>
-
-                {micEnabled ? (
-                  <div className="h-full w-full opacity-90 mix-blend-multiply">
-                    <Visualizer ref={visualizerRef} theme={theme} />
-                  </div>
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="bg-white/30 backdrop-blur text-slate-500 px-6 py-3 rounded-full text-sm font-medium">
-                      麥克風已靜音
+                {mode === 'analysis' ? (
+                  <>
+                    <div className="absolute top-4 md:top-6 left-6 md:left-8 z-10">
+                      <h2 className="text-xl font-bold text-slate-700">
+                        {theme === 'sunset' ? '日落頻譜' : theme === 'ocean' ? '海洋頻譜' : '極光頻譜'}
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        {theme === 'sunset' ? 'Geometric Sunset' : theme === 'ocean' ? 'Deep Ocean' : 'Harmonic Aurora'}
+                      </p>
                     </div>
+
+                    {micEnabled ? (
+                      <div className="h-full w-full opacity-90 mix-blend-multiply">
+                        <Visualizer ref={visualizerRef} theme={theme} />
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="bg-white/30 backdrop-blur text-slate-500 px-6 py-3 rounded-full text-sm font-medium">
+                          麥克風已靜音
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center">
+                    <DiminuendoTrainer
+                      currentNote={currentNote}
+                      currentVolume={currentVolume}
+                      isActive={isStarted}
+                    />
                   </div>
                 )}
               </div>

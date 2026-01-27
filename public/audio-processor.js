@@ -6,7 +6,6 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferIndex = 0;
     }
 
-
     process(inputs, outputs, parameters) {
         const input = inputs[0];
         if (!input || input.length === 0) return true;
@@ -19,12 +18,13 @@ class AudioProcessor extends AudioWorkletProcessor {
 
             if (this.bufferIndex >= this.bufferSize) {
                 // Buffer full, analyze and send
-                const pitch = this.autoCorrelation(this.buffer, sampleRate);
+                const analysis = this.autoCorrelation(this.buffer, sampleRate);
 
                 this.port.postMessage({
                     type: 'audio-data',
                     buffer: this.buffer.slice(),
-                    pitch: pitch // Send calculated pitch
+                    pitch: analysis.pitch,
+                    rms: analysis.rms
                 });
                 this.bufferIndex = 0;
             }
@@ -33,23 +33,20 @@ class AudioProcessor extends AudioWorkletProcessor {
         return true;
     }
 
-    // Simple Auto-correlation algorithm
+    // Improved Auto-correlation algorithm
     autoCorrelation(buffer, sampleRate) {
-        // 1. Calculate RMS to check for silence
-        let rms = 0;
+        // 1. Calculate RMS
+        let sum = 0;
         for (let i = 0; i < buffer.length; i++) {
-            rms += buffer[i] * buffer[i];
+            sum += buffer[i] * buffer[i];
         }
-        rms = Math.sqrt(rms / buffer.length);
-        if (rms < 0.01) return -1; // Too quiet
+        const rms = Math.sqrt(sum / buffer.length); // Volume (0.0 - 1.0 approx)
 
-        // 2. Auto-correlation
-        // We only need to search a range of lags corresponding to reasonable flute frequencies
+        if (rms < 0.01) return { pitch: -1, rms }; // Too quiet
+
+        // 2. Auto-correlation for Pitch
         // Flute range: B3 (246Hz) to D7 (2349Hz) approx.
-        // Let's search 50Hz to 3000Hz to be safe.
-        // Lag = sampleRate / frequency
-
-        const MIN_FREQ = 50;
+        const MIN_FREQ = 60;   // Lower bound
         const MAX_FREQ = 3000;
         const MAX_LAG = Math.floor(sampleRate / MIN_FREQ);
         const MIN_LAG = Math.floor(sampleRate / MAX_FREQ);
@@ -59,29 +56,53 @@ class AudioProcessor extends AudioWorkletProcessor {
 
         for (let lag = MIN_LAG; lag <= MAX_LAG; lag++) {
             let correlation = 0;
-            // Normalize correlation could be better but standard sum-product is okay for now
-            // Iterate over the buffer, but stop before we run out of data for the lag
+            // Simple sum of products
             for (let i = 0; i < buffer.length - lag; i++) {
                 correlation += buffer[i] * buffer[i + lag];
             }
 
-            // Normalize by the number of samples summed to be fair to different lags? 
-            // Or just straightforward AC.
-            // Usually: cor[lag] = sum(x[i] * x[i+lag])
-
+            // Verify peak: normalize by signal energy? Ideally yes, but basic peak finding works usually.
             if (correlation > bestCorrelation) {
                 bestCorrelation = correlation;
                 bestLag = lag;
             }
         }
 
-        // Refinement: Parabolic interpolation for better precision could be added here
+        let pitch = -1;
+        if (bestCorrelation > 0.01) {
+            // parabolic interpolation
+            // preciseLag = lag + (alpha - gamma) / (2 * (alpha - 2*beta + gamma))
+            // alpha = corr[lag-1], beta = corr[lag], gamma = corr[lag+1]
 
-        if (bestCorrelation > 0.01) { // Threshold
-            return sampleRate / bestLag;
+            // Need to compute neighbors
+            let alpha = 0;
+            let gamma = 0;
+
+            // Compute alpha (bestLag - 1)
+            if (bestLag > MIN_LAG) {
+                for (let i = 0; i < buffer.length - (bestLag - 1); i++) {
+                    alpha += buffer[i] * buffer[i + (bestLag - 1)];
+                }
+            }
+
+            // Compute gamma (bestLag + 1)
+            if (bestLag < MAX_LAG) {
+                for (let i = 0; i < buffer.length - (bestLag + 1); i++) {
+                    gamma += buffer[i] * buffer[i + (bestLag + 1)];
+                }
+            }
+
+            const beta = bestCorrelation;
+            const den = 2 * (alpha - 2 * beta + gamma);
+
+            let delta = 0;
+            if (den !== 0) delta = (alpha - gamma) / den;
+
+            const trueLag = bestLag + delta;
+            pitch = sampleRate / trueLag;
         }
 
-        return -1;
+        return { pitch, rms };
     }
 }
 

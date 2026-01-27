@@ -2,13 +2,13 @@ export class AudioEngine {
     public context: AudioContext | null = null;
     private workletNode: AudioWorkletNode | null = null;
     private stream: MediaStream | null = null;
-    private onAudioDataCallback: ((data: Float32Array, pitch?: number) => void) | null = null;
+    private onAudioDataCallback: ((data: Float32Array, pitch?: number, rms?: number) => void) | null = null;
 
     constructor() {
         this.context = null;
     }
 
-    async init(onAudioData: (data: Float32Array, pitch?: number) => void) {
+    async init(onAudioData: (data: Float32Array, pitch?: number, rms?: number) => void) {
         this.onAudioDataCallback = onAudioData;
         this.context = new AudioContext();
 
@@ -22,7 +22,7 @@ export class AudioEngine {
 
             this.workletNode.port.onmessage = (event) => {
                 if (event.data.type === 'audio-data' && this.onAudioDataCallback) {
-                    this.onAudioDataCallback(event.data.buffer, event.data.pitch);
+                    this.onAudioDataCallback(event.data.buffer, event.data.pitch, event.data.rms);
                 }
             };
 
