@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  font-family: 'Outfit', Inter, system-ui, sans-serif;
+  /* Prefer a rounder font if available */
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light;
+  color: #475569;
+  /* Slate-600 soft text */
+  background-color: #FDF4FF;
+  /* Very light pink/lavender base */
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar for Chrome/Safari/Edge */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(200, 160, 255, 0.3);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 160, 255, 0.5);
+}
