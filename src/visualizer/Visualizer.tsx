@@ -1,10 +1,16 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 
+export type VisualizerTheme = 'aurora' | 'sunset' | 'ocean';
+
 export interface VisualizerHandle {
     draw: (magnitudes: number[]) => void;
 }
 
-const Visualizer = forwardRef<VisualizerHandle, {}>((_props, ref) => {
+interface VisualizerProps {
+    theme?: VisualizerTheme;
+}
+
+const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ theme = 'aurora' }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useImperativeHandle(ref, () => ({
@@ -24,24 +30,37 @@ const Visualizer = forwardRef<VisualizerHandle, {}>((_props, ref) => {
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.shadowBlur = 15;
-            ctx.shadowColor = '#22d3ee'; // Cyan glow
 
-            // Create Aurora Gradient
+            // Create Theme Gradient
             const gradient = ctx.createLinearGradient(0, height, 0, 0);
-            gradient.addColorStop(0, 'rgba(34, 197, 94, 0.2)'); // Emerald (bottom)
-            gradient.addColorStop(0.4, 'rgba(34, 211, 238, 0.6)'); // Cyan
-            gradient.addColorStop(1, 'rgba(168, 85, 247, 0.8)');   // Purple (top)
+
+            if (theme === 'sunset') {
+                ctx.shadowColor = '#facc15'; // Yellow glow
+                gradient.addColorStop(0, 'rgba(244, 63, 94, 0.2)'); // Rose (bottom)
+                gradient.addColorStop(0.4, 'rgba(251, 146, 60, 0.6)'); // Orange
+                gradient.addColorStop(1, 'rgba(168, 85, 247, 0.8)');   // Purple (top)
+            } else if (theme === 'ocean') {
+                ctx.shadowColor = '#0ea5e9'; // Sky blue glow
+                gradient.addColorStop(0, 'rgba(30, 58, 138, 0.3)'); // Dark Blue (bottom)
+                gradient.addColorStop(0.4, 'rgba(14, 165, 233, 0.6)'); // Sky Blue
+                gradient.addColorStop(1, 'rgba(20, 184, 166, 0.8)');   // Teal (top)
+            } else {
+                // Aurora (Default)
+                ctx.shadowColor = '#22d3ee'; // Cyan glow
+                gradient.addColorStop(0, 'rgba(34, 197, 94, 0.2)'); // Emerald (bottom)
+                gradient.addColorStop(0.4, 'rgba(34, 211, 238, 0.6)'); // Cyan
+                gradient.addColorStop(1, 'rgba(168, 85, 247, 0.8)');   // Purple (top)
+            }
 
             ctx.fillStyle = gradient;
 
             // Draw smooth curve
             ctx.beginPath();
-            ctx.moveTo(0, height);
 
             // We will draw a filled shape: Start bottom-left, go through points, end bottom-right, close path.
             // Downsample for smoothness if needed, or just iterate.
             // Let's use a subset of points to make it smoother than raw FFT bins
-            const sliceWidth = width / magnitudes.length;
+            const sliceWidth = width / (magnitudes.length > 0 ? magnitudes.length : 1);
 
             let x = 0;
             // Start point
@@ -57,7 +76,7 @@ const Visualizer = forwardRef<VisualizerHandle, {}>((_props, ref) => {
                 // Simple lineTo for now, or quadraticCurveTo for super smooth
                 // For "Aurora", let's try a simple smooth line first
                 if (i === 0) {
-                    ctx.moveTo(x, y);
+                    ctx.lineTo(x, y);
                 } else {
                     // Smooth curve strategy: use midpoint
                     const prevX = (i - 1) * sliceWidth;
@@ -90,7 +109,7 @@ const Visualizer = forwardRef<VisualizerHandle, {}>((_props, ref) => {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
             }
         }
-    }, []);
+    }, [theme]);
 
     return (
         <div className="w-full h-full min-h-[200px] flex items-end">
