@@ -4,9 +4,14 @@ import { AudioAnalyzer } from './audio/Analyzer'
 import Visualizer, { type VisualizerHandle, type VisualizerTheme } from './visualizer/Visualizer'
 import { DiminuendoTrainer } from './components/DiminuendoTrainer'
 import { CameraView } from './components/CameraView'
+import PracticeLog from './components/PracticeLog'
+import TrebleClefIcon from './components/TrebleClefIcon'
 import { getNoteFromFrequency, type NoteData } from './utils/noteUtils'
 import { type EmbouchureMetrics } from './ai/embouchureLogic'
 import { saveAnalysisLog } from './ai/AnalysisService'
+import { ToneAnalyzer, type ToneQuality, type ToneSuggestion } from './utils/ToneAnalyzer'
+import { PracticeDataBuffer, type PitchPoint, type VolumePoint } from './utils/PracticeDataBuffer'
+import { INSTRUMENT_CONFIGS, type InstrumentType } from './utils/InstrumentConfig'
 
 interface HistoryItem {
   id: string;
@@ -33,6 +38,9 @@ function App() {
   const [mode, setMode] = useState<AppMode>('analysis');
   const [showUsage, setShowUsage] = useState(true);
   const [sensitivity, setSensitivity] = useState(1.5);
+  const [showPracticeLog, setShowPracticeLog] = useState(false);
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('flute');
+  const [showInstrumentMenu, setShowInstrumentMenu] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem('aurora_history');
@@ -49,8 +57,12 @@ function App() {
   const [currentVolume, setCurrentVolume] = useState<number>(0);
   const [embouchureMetrics, setEmbouchureMetrics] = useState<EmbouchureMetrics | null>(null);
   const [harmonics, setHarmonics] = useState<{ f1: number, f2: number, f3: number, score: number } | null>(null);
+  const [toneQuality, setToneQuality] = useState<ToneQuality | null>(null);
+  const [toneSuggestion, setToneSuggestion] = useState<ToneSuggestion | null>(null);
   const [pitchStability, setPitchStability] = useState<number | null>(null);
   const pitchHistory = useRef<number[]>([]);
+  const practiceBuffer = useRef<PracticeDataBuffer>(new PracticeDataBuffer());
+  const [practiceStability, setPracticeStability] = useState<number>(0);
 
   useEffect(() => {
     analyzerRef.current = new AudioAnalyzer(4096);
@@ -96,17 +108,47 @@ function App() {
             if (engineRef.current?.context) {
               const sampleRate = engineRef.current.context.sampleRate;
               const h = analyzerRef.current?.getHarmonics(pitch, sampleRate);
-              if (h) setHarmonics(h);
+              if (h) {
+                setHarmonics(h);
+                // Analyze tone quality and generate suggestion
+                const quality = ToneAnalyzer.analyzeToneQuality(h);
+                const suggestion = ToneAnalyzer.getSuggestion(h, quality);
+                setToneQuality(quality);
+                setToneSuggestion(suggestion);
+              }
             }
 
             pitchHistory.current.push(pitch);
-            if (pitchHistory.current.length > 10) pitchHistory.current.shift();
-
-            if (pitchHistory.current.length >= 5) {
-              const mean = pitchHistory.current.reduce((a, b) => a + b, 0) / pitchHistory.current.length;
-              const variance = pitchHistory.current.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / pitchHistory.current.length;
-              setPitchStability(Math.sqrt(variance));
+            if (pitchHistory.current.length > 30) {
+              pitchHistory.current.shift();
             }
+
+            const variance = pitchHistory.current.reduce((sum, p) => sum + Math.pow(p - pitch, 2), 0) / pitchHistory.current.length;
+            const stability = Math.sqrt(variance);
+            setPitchStability(stability);
+
+            // Add pitch point to practice buffer
+            if (noteData) {
+              const pitchPoint: PitchPoint = {
+                frequency: pitch,
+                timestamp: Date.now(),
+                stability: practiceBuffer.current.calculateLocalStability(practiceBuffer.current.getPitchHistory().length - 1),
+                note: noteData.note,
+                deviation: noteData.cents
+              };
+              practiceBuffer.current.addPitchPoint(pitchPoint);
+            }
+
+            // Add volume point to practice buffer
+            const volumePoint: VolumePoint = {
+              level: currentVolume,
+              timestamp: Date.now()
+            };
+            practiceBuffer.current.addVolumePoint(volumePoint);
+
+            // Update practice stability
+            const newStability = practiceBuffer.current.calculateStability();
+            setPracticeStability(newStability);
           } else {
             pitchHistory.current = [];
             setPitchStability(null);
@@ -275,6 +317,60 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 md:gap-3 w-full md:w-auto">
+            {/* Instrument Selector */}
+            <div className="relative">
+              <button
+                onClick={() => setShowInstrumentMenu(!showInstrumentMenu)}
+                className="flex items-center gap-2 bg-white/40 backdrop-blur-md border border-white/30 rounded-full px-4 py-2 hover:bg-white/50 transition-colors"
+              >
+                <span className="text-xl">{INSTRUMENT_CONFIGS[selectedInstrument].icon}</span>
+                <span className="text-sm font-medium text-slate-700 hidden sm:inline">
+                  {INSTRUMENT_CONFIGS[selectedInstrument].nameChinese}
+                </span>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 text-slate-500 transition-transform ${showInstrumentMenu ? 'rotate-180' : ''}`}>
+                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                </svg>
+              </button>
+
+              {/* Dropdown Menu */}
+              {showInstrumentMenu && (
+                <>
+                  {/* Backdrop to close menu */}
+                  <div
+                    className="fixed inset-0 z-[9999]"
+                    onClick={() => setShowInstrumentMenu(false)}
+                  />
+                  <div className="absolute top-full mt-2 right-0 bg-white/95 backdrop-blur-xl border border-white/40 rounded-2xl shadow-xl min-w-[200px] z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
+                    {(Object.keys(INSTRUMENT_CONFIGS) as InstrumentType[]).map((instrument) => {
+                      const config = INSTRUMENT_CONFIGS[instrument];
+                      return (
+                        <button
+                          key={instrument}
+                          onClick={() => {
+                            setSelectedInstrument(instrument);
+                            setShowInstrumentMenu(false);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-100/50 transition-colors first:rounded-t-2xl last:rounded-b-2xl ${selectedInstrument === instrument ? 'bg-slate-100/70' : ''
+                            }`}
+                        >
+                          <span className="text-2xl">{config.icon}</span>
+                          <div className="text-left flex-1">
+                            <div className="text-sm font-bold text-slate-700">{config.nameChinese}</div>
+                            <div className="text-xs text-slate-500">{config.name}</div>
+                          </div>
+                          {selectedInstrument === instrument && (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-emerald-500">
+                              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
             {/* Mode Switcher */}
             <div className="flex bg-white/40 rounded-full p-1 backdrop-blur-md border border-white/30 mr-2">
               <button
@@ -420,17 +516,24 @@ function App() {
                 {mode === 'analysis' ? (
                   <>
                     <div className="absolute top-4 md:top-6 left-6 md:left-8 z-10">
-                      <h2 className="text-xl font-bold text-slate-700">
+                      <h2 className="text-xl md:text-2xl font-bold text-slate-700">
                         {theme === 'sunset' ? '日落頻譜' : theme === 'ocean' ? '海洋頻譜' : '極光頻譜'}
                       </h2>
-                      <p className="text-sm text-slate-500">
+                      <p className="text-xs md:text-sm text-slate-400 uppercase tracking-wide">
                         {theme === 'sunset' ? 'Geometric Sunset' : theme === 'ocean' ? 'Deep Ocean' : 'Harmonic Aurora'}
                       </p>
                     </div>
 
                     {micEnabled ? (
                       <div className="h-full w-full opacity-90 mix-blend-multiply">
-                        <Visualizer ref={visualizerRef} theme={theme} />
+                        <Visualizer
+                          ref={visualizerRef}
+                          theme={theme}
+                          pitchHistory={practiceBuffer.current.getPitchHistory()}
+                          volumeHistory={practiceBuffer.current.getVolumeHistory()}
+                          currentStability={practiceStability}
+                          showPracticeOverlay={true}
+                        />
                       </div>
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -459,43 +562,49 @@ function App() {
               <div className="flex flex-col md:flex-row gap-6 md:gap-8">
                 {/* Note Bubble */}
                 <div className="bg-gradient-to-br from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 md:p-8 relative flex flex-col justify-center items-center shadow-sm flex-1">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Detected Note</h3>
-                  <div className={`w-32 h-32 md:w-40 md:h-40 rounded-full bg-gradient-to-tr ${theme === 'sunset' ? 'from-orange-100 to-rose-100' : theme === 'ocean' ? 'from-blue-100 to-teal-100' : 'from-emerald-100 to-cyan-100'} flex items-center justify-center shadow-inner relative mb-2 transition-colors duration-500`}>
-                    <span className="text-6xl md:text-7xl font-black text-slate-700 tracking-tighter">
+                  <div className="text-center mb-4">
+                    <h3 className="text-lg font-bold text-slate-700 mb-1">音準</h3>
+                    <p className="text-xs text-slate-400 uppercase tracking-widest">Pitch Accuracy</p>
+                  </div>
+                  <div className={`w-36 h-36 md:w-48 md:h-48 rounded-full bg-gradient-to-tr ${theme === 'sunset' ? 'from-orange-100 to-rose-100' : theme === 'ocean' ? 'from-blue-100 to-teal-100' : 'from-emerald-100 to-cyan-100'} flex items-center justify-center shadow-inner relative mb-2 transition-colors duration-500`}>
+                    <span className="text-7xl md:text-8xl font-black text-slate-700 tracking-tighter">
                       {currentNote ? currentNote.note : '--'}
                     </span>
                     {currentNote && (
-                      <span className={`absolute -right-2 top-0 bg-white/80 backdrop-blur px-3 py-1 rounded-full text-sm font-bold shadow-sm ${Math.abs(currentNote.deviation) < 5 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      <span className={`absolute -right-2 top-0 bg-white/80 backdrop-blur px-4 py-2 rounded-full text-base font-bold shadow-sm ${Math.abs(currentNote.deviation) < 5 ? 'text-emerald-500' : 'text-amber-500'}`}>
                         {currentNote.cents > 0 ? '+' : ''}{currentNote.cents.toFixed(0)}
                       </span>
                     )}
                   </div>
-                  <p className="font-mono text-slate-500 mt-2 bg-white/30 px-4 py-1 rounded-full text-sm">
+                  <p className="font-mono text-slate-500 mt-2 bg-white/30 px-5 py-2 rounded-full text-base font-medium">
                     {currentNote ? `${currentNote.frequency.toFixed(1)} Hz` : '0.0 Hz'}
                   </p>
                 </div>
 
                 {/* Quality Bars */}
                 <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 md:p-8 flex flex-col justify-center shadow-sm flex-1">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">Sound Quality</h3>
+                  <div className="mb-6">
+                    <h3 className="text-lg font-bold text-slate-700 mb-1">聲音品質</h3>
+                    <p className="text-xs text-slate-400 uppercase tracking-widest">Sound Quality</p>
+                  </div>
 
                   <div className="space-y-6">
-                    <div className="bg-white/40 rounded-2xl p-4">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-slate-600 font-medium">共鳴度</span>
-                        <span className={`font-bold ${theme === 'sunset' ? 'text-orange-600' : 'text-cyan-600'}`}>{harmonics ? (harmonics.score * 100).toFixed(0) : 0}%</span>
+                    <div className="bg-white/40 rounded-2xl p-5">
+                      <div className="flex justify-between text-base mb-3">
+                        <span className="text-slate-600 font-semibold">共鳴度</span>
+                        <span className={`font-black text-lg ${theme === 'sunset' ? 'text-orange-600' : 'text-cyan-600'}`}>{harmonics ? (harmonics.score * 100).toFixed(0) : 0}%</span>
                       </div>
-                      <div className="h-3 w-full bg-white/50 rounded-full overflow-hidden shadow-inner">
+                      <div className="h-4 w-full bg-white/50 rounded-full overflow-hidden shadow-inner">
                         <div style={{ width: `${harmonics ? (harmonics.score * 100) : 0}%` }} className={`h-full bg-gradient-to-r ${theme === 'sunset' ? 'from-orange-400 to-rose-400' : theme === 'ocean' ? 'from-blue-400 to-teal-400' : 'from-emerald-400 to-cyan-400'} rounded-full transition-all duration-300`}></div>
                       </div>
                     </div>
 
-                    <div className="bg-white/40 rounded-2xl p-4">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-slate-600 font-medium">穩定性</span>
-                        <span className="font-bold text-indigo-600">{pitchStability ? pitchStability.toFixed(1) : '--'}</span>
+                    <div className="bg-white/40 rounded-2xl p-5">
+                      <div className="flex justify-between text-base mb-3">
+                        <span className="text-slate-600 font-semibold">穩定性</span>
+                        <span className="font-black text-lg text-indigo-600">{pitchStability ? pitchStability.toFixed(1) : '--'}</span>
                       </div>
-                      <div className="h-3 w-full bg-white/50 rounded-full overflow-hidden shadow-inner">
+                      <div className="h-4 w-full bg-white/50 rounded-full overflow-hidden shadow-inner">
                         <div style={{ width: `${Math.max(0, 100 - (pitchStability || 0) * 10)}%` }} className="h-full bg-gradient-to-r from-indigo-400 to-purple-400 rounded-full transition-all duration-300"></div>
                       </div>
                     </div>
@@ -512,7 +621,10 @@ function App() {
             {/* Camera View */}
             <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-2 shadow-sm">
               <div className="flex justify-between items-center px-4 py-2">
-                <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">Embouchure Cam</span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-700">嘴型監測</h3>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Embouchure Cam</p>
+                </div>
                 <button
                   onClick={() => setShowCamera(!showCamera)}
                   className={`text-xs px-2 py-1 rounded-full border ${showCamera ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
@@ -549,16 +661,29 @@ function App() {
 
             {/* Harmonics / Tips */}
             <div className="bg-gradient-to-b from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-8 flex-1 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6 text-center">泛音結構</h3>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-700 mb-1">泛音分析</h3>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">Harmonic Analysis</p>
+                </div>
+                {toneQuality && (
+                  <div className="flex items-center gap-1 bg-white/50 px-4 py-2 rounded-full">
+                    <span className="text-sm font-bold text-slate-500">品質</span>
+                    <span className={`text-xl font-black ${toneQuality.overall >= 80 ? 'text-emerald-500' : toneQuality.overall >= 60 ? 'text-cyan-500' : 'text-amber-500'}`}>
+                      {toneQuality.overall}%
+                    </span>
+                  </div>
+                )}
+              </div>
 
-              <div className="flex justify-center items-end gap-6 h-40 mb-6">
+              <div className="flex justify-center items-end gap-6 h-40 mb-4">
                 {/* Dynamic Theme Colors for Bars */}
                 {[
-                  { label: 'F1', val: harmonics?.f1 },
-                  { label: 'F2', val: harmonics?.f2 },
-                  { label: 'F3', val: harmonics?.f3 }
+                  { label: 'F1', val: harmonics?.f1, name: '基頻' },
+                  { label: 'F2', val: harmonics?.f2, name: '二次' },
+                  { label: 'F3', val: harmonics?.f3, name: '三次' }
                 ].map((bar, i) => (
-                  <div key={i} className="flex flex-col items-center gap-3">
+                  <div key={i} className="flex flex-col items-center gap-2 group">
                     <div className="w-10 bg-white/40 rounded-full relative h-40 flex items-end overflow-hidden p-1 shadow-inner">
                       <div
                         className={`w-full rounded-full transition-all duration-300 ${theme === 'sunset' ? 'bg-gradient-to-t from-orange-400 to-rose-300' :
@@ -569,15 +694,55 @@ function App() {
                       ></div>
                     </div>
                     <span className="text-xs font-bold text-slate-400">{bar.label}</span>
+                    <span className="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">{bar.name}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="bg-white/40 rounded-2xl p-4 text-center border border-white/30">
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                  "音色越飽滿，{theme === 'sunset' ? '夕陽越紅豔' : theme === 'ocean' ? '海洋越深邃' : '極光越明亮'}。<br />試著放鬆喉嚨，讓聲音流動。"
-                </p>
-              </div>
+              {/* Tone Quality Metrics */}
+              {toneQuality && (
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="bg-white/30 rounded-xl p-3 text-center">
+                    <div className="text-xs text-slate-500 font-bold uppercase">明亮度</div>
+                    <div className="text-xl font-black text-slate-600">{toneQuality.brightness}%</div>
+                  </div>
+                  <div className="bg-white/30 rounded-xl p-3 text-center">
+                    <div className="text-xs text-slate-500 font-bold uppercase">豐富度</div>
+                    <div className="text-xl font-black text-slate-600">{toneQuality.richness}%</div>
+                  </div>
+                  <div className="bg-white/30 rounded-xl p-3 text-center">
+                    <div className="text-xs text-slate-500 font-bold uppercase">平衡度</div>
+                    <div className="text-xl font-black text-slate-600">{toneQuality.balance}%</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Smart Suggestion */}
+              {toneSuggestion ? (
+                <div className={`rounded-2xl p-5 border ${toneSuggestion.type === 'excellent' ? 'bg-emerald-50 border-emerald-200' :
+                  toneSuggestion.type === 'good' ? 'bg-cyan-50 border-cyan-200' :
+                    toneSuggestion.type === 'needsWork' ? 'bg-amber-50 border-amber-200' :
+                      'bg-rose-50 border-rose-200'
+                  }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-2xl">{toneSuggestion.icon}</span>
+                    <span className={`text-base font-bold ${toneSuggestion.type === 'excellent' ? 'text-emerald-600' :
+                      toneSuggestion.type === 'good' ? 'text-cyan-600' :
+                        toneSuggestion.type === 'needsWork' ? 'text-amber-600' :
+                          'text-rose-600'
+                      }`}>{toneSuggestion.message}</span>
+                  </div>
+                  {toneSuggestion.tip && (
+                    <p className="text-sm text-slate-600 leading-relaxed">{toneSuggestion.tip}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-white/40 rounded-2xl p-5 text-center border border-white/30">
+                  <p className="text-sm text-slate-500 leading-relaxed font-medium">
+                    "開始演奏以獲得音色分析與建議"
+                  </p>
+                </div>
+              )}
             </div>
 
           </div>
@@ -665,6 +830,24 @@ function App() {
 
 
       </main>
+
+      {/* Floating Practice Log Menu Button */}
+      <button
+        onClick={() => setShowPracticeLog(true)}
+        className={`fixed top-6 right-6 z-30 w-14 h-14 rounded-full bg-gradient-to-br ${theme === 'sunset' ? 'from-orange-400 to-rose-400' : theme === 'ocean' ? 'from-blue-400 to-teal-400' : 'from-emerald-400 to-cyan-400'} text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center group animate-float`}
+        title="練習日誌"
+      >
+        <TrebleClefIcon className="w-7 h-7" />
+        <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-rose-400 rounded-full animate-pulse" />
+      </button>
+
+      {/* Practice Log Panel */}
+      <PracticeLog
+        isOpen={showPracticeLog}
+        onClose={() => setShowPracticeLog(false)}
+        theme={theme}
+        currentToneQuality={toneQuality}
+      />
     </div>
   )
 }

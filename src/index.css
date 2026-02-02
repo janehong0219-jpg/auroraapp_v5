@@ -42,3 +42,20 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(200, 160, 255, 0.5);
 }
+
+/* Floating animation for practice log button */
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}

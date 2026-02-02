@@ -1,4 +1,5 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import type { PitchPoint, VolumePoint } from '../utils/PracticeDataBuffer';
 
 export type VisualizerTheme = 'aurora' | 'sunset' | 'ocean';
 
@@ -8,9 +9,19 @@ export interface VisualizerHandle {
 
 interface VisualizerProps {
     theme?: VisualizerTheme;
+    pitchHistory?: PitchPoint[];
+    volumeHistory?: VolumePoint[];
+    currentStability?: number;
+    showPracticeOverlay?: boolean;
 }
 
-const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ theme = 'aurora' }, ref) => {
+const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({
+    theme = 'aurora',
+    pitchHistory = [],
+    volumeHistory = [],
+    currentStability = 0,
+    showPracticeOverlay = true
+}, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useImperativeHandle(ref, () => ({
@@ -98,8 +109,182 @@ const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ theme = 'aur
             ctx.lineWidth = 2;
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.stroke();
+
+            // Draw practice overlay if enabled
+            if (showPracticeOverlay) {
+                drawPracticeOverlay(ctx, width, height);
+            }
         }
     }));
+
+    // Draw practice overlay layers
+    const drawPracticeOverlay = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        // Layer 1: Pitch History Track (top 20%)
+        if (pitchHistory.length > 1) {
+            drawPitchTrack(ctx, width, height);
+        }
+
+        // Layer 2: Volume Envelope (bottom 15%)
+        if (volumeHistory.length > 1) {
+            drawVolumeEnvelope(ctx, width, height);
+        }
+
+        // Layer 3: Stability Indicator (top right)
+        if (currentStability > 0) {
+            drawStabilityIndicator(ctx, width, height);
+        }
+    };
+
+    // Draw pitch history track with color-coded stability
+    const drawPitchTrack = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        const trackHeight = height * 0.2;
+        const trackY = height * 0.05;
+
+        if (pitchHistory.length < 2) return;
+
+        // Find min/max frequency for scaling
+        const frequencies = pitchHistory.map(p => p.frequency);
+        const minFreq = Math.min(...frequencies);
+        const maxFreq = Math.max(...frequencies);
+        const freqRange = maxFreq - minFreq || 100; // Avoid division by zero
+
+        const pointWidth = width / Math.max(pitchHistory.length - 1, 1);
+
+        // Draw segments with color-coded stability
+        for (let i = 0; i < pitchHistory.length - 1; i++) {
+            const point = pitchHistory[i];
+            const nextPoint = pitchHistory[i + 1];
+
+            const x1 = i * pointWidth;
+            const x2 = (i + 1) * pointWidth;
+
+            // Normalize frequency to track range
+            const y1 = trackY + trackHeight - ((point.frequency - minFreq) / freqRange * trackHeight);
+            const y2 = trackY + trackHeight - ((nextPoint.frequency - minFreq) / freqRange * trackHeight);
+
+            // Color based on stability
+            const stability = point.stability;
+            let color;
+            if (stability >= 70) {
+                color = 'rgba(16, 185, 129, 0.8)'; // Green - stable
+            } else if (stability >= 40) {
+                color = 'rgba(245, 158, 11, 0.8)'; // Amber - moderate
+            } else {
+                color = 'rgba(239, 68, 68, 0.8)'; // Red - unstable
+            }
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        // Draw note labels at key points
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+
+        // Show first, middle, and last note
+        const keyIndices = [
+            0,
+            Math.floor(pitchHistory.length / 2),
+            pitchHistory.length - 1
+        ];
+
+        keyIndices.forEach(i => {
+            if (i < pitchHistory.length) {
+                const point = pitchHistory[i];
+                const x = i * pointWidth;
+                const y = trackY + trackHeight - ((point.frequency - minFreq) / freqRange * trackHeight);
+                ctx.fillText(point.note, x, y - 5);
+            }
+        });
+    };
+
+    // Draw volume envelope
+    const drawVolumeEnvelope = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        const envelopeHeight = height * 0.12;
+        const envelopeY = height * 0.83;
+
+        if (volumeHistory.length < 2) return;
+
+        const pointWidth = width / Math.max(volumeHistory.length - 1, 1);
+
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.3)';
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.6)';
+        ctx.lineWidth = 2;
+
+        // Draw filled envelope
+        ctx.beginPath();
+        ctx.moveTo(0, envelopeY + envelopeHeight);
+
+        volumeHistory.forEach((point, i) => {
+            const x = i * pointWidth;
+            const barHeight = (point.level / 100) * envelopeHeight;
+            const y = envelopeY + envelopeHeight - barHeight;
+
+            if (i === 0) {
+                ctx.lineTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        });
+
+        ctx.lineTo(width, envelopeY + envelopeHeight);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw baseline
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, envelopeY + envelopeHeight);
+        ctx.lineTo(width, envelopeY + envelopeHeight);
+        ctx.stroke();
+    };
+
+    // Draw stability indicator
+    const drawStabilityIndicator = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+        const indicatorSize = 40;
+        const x = width - indicatorSize - 15;
+        const y = 15;
+
+        // Determine color based on stability
+        let color;
+        if (currentStability >= 80) {
+            color = '#10b981'; // Emerald - excellent
+        } else if (currentStability >= 60) {
+            color = '#06b6d4'; // Cyan - good
+        } else if (currentStability >= 40) {
+            color = '#f59e0b'; // Amber - needs work
+        } else {
+            color = '#ef4444'; // Red - poor
+        }
+
+        // Draw circle background
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(x + indicatorSize / 2, y + indicatorSize / 2, indicatorSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw colored ring
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(x + indicatorSize / 2, y + indicatorSize / 2, indicatorSize / 2 - 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Draw stability percentage
+        ctx.fillStyle = color;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${currentStability}`, x + indicatorSize / 2, y + indicatorSize / 2);
+    };
 
     useEffect(() => {
         const canvas = canvasRef.current;
