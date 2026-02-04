@@ -4,6 +4,17 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferSize = 4096;
         this.buffer = new Float32Array(this.bufferSize);
         this.bufferIndex = 0;
+
+        // 噪音門限（可動態調整）
+        this.noiseGateThreshold = 0.01;
+
+        // 監聽來自主線程的訊息
+        this.port.onmessage = (event) => {
+            if (event.data.type === 'set-threshold') {
+                this.noiseGateThreshold = event.data.threshold;
+                console.log(`🎚️ Audio Processor 噪音門限已更新: ${(this.noiseGateThreshold * 100).toFixed(1)}%`);
+            }
+        };
     }
 
     process(inputs, outputs, parameters) {
@@ -20,12 +31,24 @@ class AudioProcessor extends AudioWorkletProcessor {
                 // Buffer full, analyze and send
                 const analysis = this.autoCorrelation(this.buffer, sampleRate);
 
-                this.port.postMessage({
-                    type: 'audio-data',
-                    buffer: this.buffer.slice(),
-                    pitch: analysis.pitch,
-                    rms: analysis.rms
-                });
+                // 噪音門限：如果 RMS 低於閾值，發送靜音狀態
+                if (analysis.rms < this.noiseGateThreshold) {
+                    this.port.postMessage({
+                        type: 'audio-data',
+                        buffer: new Float32Array(this.bufferSize), // 靜音 buffer
+                        pitch: 0,  // 無音高
+                        rms: 0     // 零音量
+                    });
+                } else {
+                    // 正常發送分析結果
+                    this.port.postMessage({
+                        type: 'audio-data',
+                        buffer: this.buffer.slice(),
+                        pitch: analysis.pitch,
+                        rms: analysis.rms
+                    });
+                }
+
                 this.bufferIndex = 0;
             }
         }
@@ -42,7 +65,8 @@ class AudioProcessor extends AudioWorkletProcessor {
         }
         const rms = Math.sqrt(sum / buffer.length); // Volume (0.0 - 1.0 approx)
 
-        if (rms < 0.01) return { pitch: -1, rms }; // Too quiet
+        // 提早返回：如果音量太小，不進行音高檢測（節省計算）
+        if (rms < 0.001) return { pitch: -1, rms };
 
         // 2. Auto-correlation for Pitch
         // Flute range: B3 (246Hz) to D7 (2349Hz) approx.

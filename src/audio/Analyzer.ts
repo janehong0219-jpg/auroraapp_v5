@@ -73,4 +73,69 @@ export class AudioAnalyzer {
 
         return { f1, f2, f3, score };
     }
+
+    /**
+     * 計算頻譜質心 (Spectral Centroid) - 音色明亮度指標
+     * 質心越高 = 音色越明亮/尖銳
+     * 質心越低 = 音色越溫暖/厚實
+     * @param magnitudes FFT 頻率幅度陣列
+     * @param sampleRate 取樣率
+     * @returns 頻譜質心（Hz）
+     */
+    calculateSpectralCentroid(magnitudes: number[], sampleRate: number): number {
+        let weightedSum = 0;
+        let magnitudeSum = 0;
+
+        for (let i = 0; i < magnitudes.length; i++) {
+            // 計算該 bin 對應的頻率
+            const frequency = (i * sampleRate) / (magnitudes.length * 2);
+
+            weightedSum += frequency * magnitudes[i];
+            magnitudeSum += magnitudes[i];
+        }
+
+        // 避免除以零
+        return magnitudeSum > 0 ? weightedSum / magnitudeSum : 0;
+    }
+
+    /**
+     * 分析音色共鳴品質
+     * 基於頻譜質心判斷口腔開合程度
+     * @param centroid 頻譜質心（Hz）
+     * @returns 音色品質評估
+     */
+    analyzeToneResonance(centroid: number): {
+        quality: 'warm' | 'balanced' | 'bright' | 'harsh';
+        score: number;
+        advice: string;
+    } {
+        // 直笛/長笛理想質心範圍: 800-1500 Hz
+        // 這個範圍代表口腔打開、形成良好共鳴箱
+
+        if (centroid < 800) {
+            return {
+                quality: 'warm',
+                score: 85,
+                advice: '音色溫暖飽滿，非常好！'
+            };
+        } else if (centroid < 1500) {
+            return {
+                quality: 'balanced',
+                score: 95,
+                advice: '音色平衡理想，口腔共鳴極佳！'
+            };
+        } else if (centroid < 2500) {
+            return {
+                quality: 'bright',
+                score: 70,
+                advice: '音色稍亮，試著打開口腔（含蛋原理）'
+            };
+        } else {
+            return {
+                quality: 'harsh',
+                score: 40,
+                advice: '音色過亮刺耳，請放鬆嘴唇並打開口腔'
+            };
+        }
+    }
 }

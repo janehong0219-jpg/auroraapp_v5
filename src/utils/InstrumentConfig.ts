@@ -2,13 +2,15 @@
  * 樂器配置 - 定義不同樂器的特性和音域
  */
 
-export type InstrumentType = 'flute' | 'clarinet' | 'saxophone' | 'recorder' | 'ocarina' | 'chinese-flute';
+export type InstrumentType = 'vocal' | 'flute' | 'clarinet' | 'saxophone' | 'recorder' | 'ocarina' | 'chinese-flute';
 
 export interface InstrumentConfig {
     id: InstrumentType;
     name: string;
     nameChinese: string;
-    icon: string; // Emoji icon
+    icon: string; // Color gradient for badge
+    iconText: string; // Letter to display
+    monitoringMode: 'vocal' | 'flute' | 'reed'; // Embouchure monitoring strategy
 
     // 音域範圍 (Hz)
     range: {
@@ -37,12 +39,45 @@ export interface InstrumentConfig {
 }
 
 export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
+    // 聲樂/唱歌
+    vocal: {
+        id: 'vocal',
+        name: 'Vocal',
+        nameChinese: '聲樂',
+        icon: 'from-purple-500 to-pink-500',
+        iconText: 'V',
+        monitoringMode: 'vocal',
+        range: {
+            min: 82,   // E2 (男低音)
+            max: 1319  // E6 (女高音)
+        },
+        optimalRange: {
+            min: 131,  // C3
+            max: 1047  // C6
+        },
+        toneCharacteristics: {
+            ideal: '圓潤通透、共鳴飽滿',
+            tips: [
+                '保持喉嚨放鬆',
+                '使用腹式呼吸',
+                '注意嘴型和共鳴腔'
+            ]
+        },
+        specificTips: {
+            breath: '深呼吸，用腹部支撐，保持氣息穩定流暢',
+            embouchure: '嘴型要自然放鬆，根據音高調整開口大小和形狀',
+            tone: '追求圓潤飽滿的音色，善用頭腔、胸腔共鳴'
+        }
+    },
+
     // 長笛
     flute: {
         id: 'flute',
         name: 'Flute',
         nameChinese: '長笛',
-        icon: '🪈',
+        icon: 'from-sky-500 to-blue-500',
+        iconText: 'FL',
+        monitoringMode: 'flute',
         range: {
             min: 262,  // C4
             max: 2349  // D7
@@ -71,7 +106,9 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
         id: 'clarinet',
         name: 'Clarinet',
         nameChinese: '豎笛',
-        icon: '🎵',
+        icon: 'from-amber-500 to-orange-500',
+        iconText: 'CL',
+        monitoringMode: 'reed',
         range: {
             min: 147,  // D3
             max: 1568  // G6
@@ -100,7 +137,9 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
         id: 'saxophone',
         name: 'Saxophone',
         nameChinese: '薩克斯風',
-        icon: '🎷',
+        icon: 'from-yellow-500 to-amber-600',
+        iconText: 'SX',
+        monitoringMode: 'reed',
         range: {
             min: 139,  // C#3 (Alto Sax)
             max: 880   // A5
@@ -129,7 +168,9 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
         id: 'recorder',
         name: 'Recorder',
         nameChinese: '直笛',
-        icon: '📯',
+        icon: 'from-emerald-500 to-teal-500',
+        iconText: 'RC',
+        monitoringMode: 'reed',
         range: {
             min: 262,  // C4 (高音直笛)
             max: 2093  // C7
@@ -158,7 +199,9 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
         id: 'ocarina',
         name: 'Ocarina',
         nameChinese: '陶笛',
-        icon: '🎐',
+        icon: 'from-rose-500 to-pink-500',
+        iconText: 'OC',
+        monitoringMode: 'reed',
         range: {
             min: 262,  // C4 (12孔AC調)
             max: 1568  // G6
@@ -187,7 +230,9 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
         id: 'chinese-flute',
         name: 'Chinese Flute',
         nameChinese: '中國笛',
-        icon: '🎋',
+        icon: 'from-indigo-500 to-purple-500',
+        iconText: 'CF',
+        monitoringMode: 'flute',
         range: {
             min: 196,  // G3 (曲笛)
             max: 1568  // G6

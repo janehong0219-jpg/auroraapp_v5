@@ -1,12 +1,13 @@
 import { useRef, useEffect, useState } from 'react';
 import { FaceDetector } from '../ai/FaceDetector';
-import { calculateEmbouchure, type EmbouchureMetrics } from '../ai/embouchureLogic';
+import { calculateUnifiedEmbouchure, type UnifiedEmbouchureMetrics } from '../ai/embouchureLogic';
 
 interface CameraViewProps {
-    onMetricsUpdate?: (metrics: EmbouchureMetrics | null) => void;
+    monitoringMode: 'vocal' | 'flute' | 'reed';
+    onMetricsUpdate?: (metrics: UnifiedEmbouchureMetrics | null) => void;
 }
 
-export const CameraView: React.FC<CameraViewProps> = ({ onMetricsUpdate }) => {
+export const CameraView: React.FC<CameraViewProps> = ({ monitoringMode, onMetricsUpdate }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isAiReady, setIsAiReady] = useState(false);
@@ -49,44 +50,59 @@ export const CameraView: React.FC<CameraViewProps> = ({ onMetricsUpdate }) => {
         };
     }, []);
 
-    const detectLoop = async () => {
+    const detectLoop = () => {
         if (!videoRef.current || !detectorRef.current || !canvasRef.current) return;
 
-        if (videoRef.current.readyState === 4) { // HAVE_ENOUGH_DATA
-            const faces = await detectorRef.current.estimateFaces(videoRef.current);
+        if (videoRef.current.readyState === 4) {
+            detectorRef.current.estimateFaces(videoRef.current).then(faces => {
+                const ctx = canvasRef.current?.getContext('2d');
+                if (ctx && canvasRef.current && faces && faces.length > 0) {
+                    const width = canvasRef.current.width;
+                    const height = canvasRef.current.height;
+                    ctx.clearRect(0, 0, width, height);
 
-            // Draw
-            const ctx = canvasRef.current.getContext('2d');
-            if (ctx && faces && faces.length > 0) {
-                const width = canvasRef.current.width;
-                const height = canvasRef.current.height;
-                ctx.clearRect(0, 0, width, height);
+                    const face = faces[0];
 
-                // Draw mesh
-                const face = faces[0];
-                ctx.fillStyle = '#00ff00';
+                    // 根據監測模式顯示不同的關鍵點
+                    let landmarksToVisualize: number[] = [];
+                    if (monitoringMode === 'vocal') {
+                        landmarksToVisualize = [13, 14, 61, 291];
+                    } else if (monitoringMode === 'flute') {
+                        landmarksToVisualize = [61, 291, 19, 164];
+                    } else if (monitoringMode === 'reed') {
+                        landmarksToVisualize = [50, 280, 172, 397, 152];
+                    }
 
-                // Visualize only the mouth area for performance and clarity
-                const mouthIndices = [13, 14, 61, 291];
-                mouthIndices.forEach(index => {
-                    const kp = face.keypoints[index];
-                    ctx.beginPath();
-                    ctx.arc(kp.x, kp.y, 3, 0, 2 * Math.PI); // Larger dots for key landmarks
-                    ctx.fillStyle = '#00cccc'; // Cyan
-                    ctx.fill();
-                });
+                    landmarksToVisualize.forEach(index => {
+                        const kp = face.keypoints[index];
+                        if (kp) {
+                            ctx.beginPath();
+                            ctx.arc(kp.x, kp.y, 3, 0, 2 * Math.PI);
+                            ctx.fillStyle = '#00cccc';
+                            ctx.fill();
+                        }
+                    });
 
-                // Calculate Metrics
-                if (onMetricsUpdate) {
-                    const metrics = calculateEmbouchure(face.keypoints);
-                    onMetricsUpdate(metrics);
+                    // Calculate Metrics
+                    if (onMetricsUpdate) {
+                        const metrics = calculateUnifiedEmbouchure(face.keypoints, monitoringMode);
+                        onMetricsUpdate(metrics);
+
+                        // 視覺警告：檢測到微笑緊張
+                        if (metrics?.mode === 'flute' && metrics.flute?.smileTension?.isTooWide) {
+                            ctx.strokeStyle = 'rgba(245, 158, 11, 0.9)';
+                            ctx.lineWidth = 8;
+                            ctx.strokeRect(10, 10, width - 20, height - 20);
+
+                            ctx.fillStyle = 'rgb(245, 158, 11)';
+                            ctx.font = 'bold 24px sans-serif';
+                            ctx.fillText('⚠️ 嘴型變成 O，不要笑！', 40, 50);
+                        }
+                    }
                 }
-            }
+            });
         }
 
-        // Throttle to ~30 FPS if needed, or just run max
-        // requestRef.current = requestAnimationFrame(detectLoop);
-        // Let's use setTimeout for a simplified 15fps as per request to save CPU
         setTimeout(() => {
             requestRef.current = requestAnimationFrame(detectLoop);
         }, 1000 / 15);
@@ -96,7 +112,7 @@ export const CameraView: React.FC<CameraViewProps> = ({ onMetricsUpdate }) => {
         <div className="relative w-full h-full aspect-video bg-black/50 rounded-xl overflow-hidden">
             <video
                 ref={videoRef}
-                className="absolute top-0 left-0 w-full h-full object-cover transform -scale-x-100" // Mirror
+                className="absolute top-0 left-0 w-full h-full object-cover transform -scale-x-100"
                 playsInline
                 muted
             />
@@ -104,13 +120,13 @@ export const CameraView: React.FC<CameraViewProps> = ({ onMetricsUpdate }) => {
                 ref={canvasRef}
                 width={640}
                 height={480}
-                className="absolute top-0 left-0 w-full h-full transform -scale-x-100" // Match mirror
+                className="absolute top-0 left-0 w-full h-full transform -scale-x-100"
             />
             {!isAiReady && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white font-medium backdrop-blur-sm">
-                    <div className="flex flex-col items-center gap-2">
-                        <div className="w-8 h-8 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin"></div>
-                        <span className="text-xs tracking-widest uppercase text-cyan-500">Initializing AI...</span>
+                <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+                        <p>載入 AI 模型中...</p>
                     </div>
                 </div>
             )}

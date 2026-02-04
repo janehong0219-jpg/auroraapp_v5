@@ -126,6 +126,17 @@ export async function getTodayLog(): Promise<PracticeLogData | null> {
     return null;
 }
 
+export async function getLogByDate(date: Date): Promise<PracticeLogData | null> {
+    const dateKey = getDateKey(date);
+    const docRef = doc(db, COLLECTION_NAME, USER_ID, 'logs', dateKey);
+
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+        return docSnap.data() as PracticeLogData;
+    }
+    return null;
+}
+
 export async function getPracticeLogs(days: number = 30): Promise<Map<string, PracticeLogData>> {
     const logsMap = new Map<string, PracticeLogData>();
     const logsRef = collection(db, COLLECTION_NAME, USER_ID, 'logs');

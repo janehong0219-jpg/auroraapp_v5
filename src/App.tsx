@@ -7,11 +7,11 @@ import { CameraView } from './components/CameraView'
 import PracticeLog from './components/PracticeLog'
 import TrebleClefIcon from './components/TrebleClefIcon'
 import { getNoteFromFrequency, type NoteData } from './utils/noteUtils'
-import { type EmbouchureMetrics } from './ai/embouchureLogic'
 import { saveAnalysisLog } from './ai/AnalysisService'
 import { ToneAnalyzer, type ToneQuality, type ToneSuggestion } from './utils/ToneAnalyzer'
 import { PracticeDataBuffer, type PitchPoint, type VolumePoint } from './utils/PracticeDataBuffer'
 import { INSTRUMENT_CONFIGS, type InstrumentType } from './utils/InstrumentConfig'
+import { type UnifiedEmbouchureMetrics } from './ai/embouchureLogic'
 
 interface HistoryItem {
   id: string;
@@ -39,8 +39,15 @@ function App() {
   const [showUsage, setShowUsage] = useState(true);
   const [sensitivity, setSensitivity] = useState(1.5);
   const [showPracticeLog, setShowPracticeLog] = useState(false);
-  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('flute');
-  const [showInstrumentMenu, setShowInstrumentMenu] = useState(false);
+  const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('vocal');
+
+  // 噪音抑制設定
+  const [noiseSuppression, setNoiseSuppression] = useState({
+    enabled: true,
+    highPassCutoff: 150,      // Hz
+    noiseGateThreshold: 0.01  // 1%
+  });
+
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem('aurora_history');
@@ -55,10 +62,19 @@ function App() {
   const visualizerRef = useRef<VisualizerHandle>(null);
   const [currentNote, setCurrentNote] = useState<NoteData | null>(null);
   const [currentVolume, setCurrentVolume] = useState<number>(0);
-  const [embouchureMetrics, setEmbouchureMetrics] = useState<EmbouchureMetrics | null>(null);
+  const [embouchureMetrics, setEmbouchureMetrics] = useState<UnifiedEmbouchureMetrics | null>(null);
   const [harmonics, setHarmonics] = useState<{ f1: number, f2: number, f3: number, score: number } | null>(null);
   const [toneQuality, setToneQuality] = useState<ToneQuality | null>(null);
   const [toneSuggestion, setToneSuggestion] = useState<ToneSuggestion | null>(null);
+
+  // 共鳴分析狀態
+  const [toneResonance, setToneResonance] = useState<{
+    quality: 'warm' | 'balanced' | 'bright' | 'harsh';
+    score: number;
+    advice: string;
+    centroid: number;
+  } | null>(null);
+
   const [pitchStability, setPitchStability] = useState<number | null>(null);
   const pitchHistory = useRef<number[]>([]);
   const practiceBuffer = useRef<PracticeDataBuffer>(new PracticeDataBuffer());
@@ -89,15 +105,18 @@ function App() {
 
     try {
       if (!isStarted) {
-        // Start Audio Context
+        // Start Audio Context with noise suppression options
         await engineRef.current.init((data, pitch, rms) => {
           if (!micEnabled) return;
 
           if (rms !== undefined) setCurrentVolume(rms);
 
+          let magnitudes: number[] = [];
+          let scaled: number[] = [];
+
           if (analyzerRef.current && visualizerRef.current) {
-            const magnitudes = analyzerRef.current.analyze(data);
-            const scaled = magnitudes.map(m => m * sensitivity);
+            magnitudes = analyzerRef.current.analyze(data);
+            scaled = magnitudes.map(m => m * sensitivity);
             visualizerRef.current.draw(scaled);
           }
 
@@ -115,6 +134,16 @@ function App() {
                 const suggestion = ToneAnalyzer.getSuggestion(h, quality);
                 setToneQuality(quality);
                 setToneSuggestion(suggestion);
+              }
+
+              // 計算頻譜質心（共鳴分析）- 只針對樂器，不包含聲樂
+              if (analyzerRef.current && selectedInstrument !== 'vocal' && scaled.length > 0) {
+                const centroid = analyzerRef.current.calculateSpectralCentroid(scaled, sampleRate);
+                const resonance = analyzerRef.current.analyzeToneResonance(centroid);
+                setToneResonance({
+                  ...resonance,
+                  centroid
+                });
               }
             }
 
@@ -154,7 +183,10 @@ function App() {
             setPitchStability(null);
             setHarmonics(null);
           }
-        });
+        }, noiseSuppression.enabled ? {
+          highPassCutoff: noiseSuppression.highPassCutoff,
+          noiseGateThreshold: noiseSuppression.noiseGateThreshold
+        } : undefined);
         setIsStarted(true);
       }
     } catch (e) {
@@ -317,60 +349,6 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 md:gap-3 w-full md:w-auto">
-            {/* Instrument Selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowInstrumentMenu(!showInstrumentMenu)}
-                className="flex items-center gap-2 bg-white/40 backdrop-blur-md border border-white/30 rounded-full px-4 py-2 hover:bg-white/50 transition-colors"
-              >
-                <span className="text-xl">{INSTRUMENT_CONFIGS[selectedInstrument].icon}</span>
-                <span className="text-sm font-medium text-slate-700 hidden sm:inline">
-                  {INSTRUMENT_CONFIGS[selectedInstrument].nameChinese}
-                </span>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 text-slate-500 transition-transform ${showInstrumentMenu ? 'rotate-180' : ''}`}>
-                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                </svg>
-              </button>
-
-              {/* Dropdown Menu */}
-              {showInstrumentMenu && (
-                <>
-                  {/* Backdrop to close menu */}
-                  <div
-                    className="fixed inset-0 z-[9999]"
-                    onClick={() => setShowInstrumentMenu(false)}
-                  />
-                  <div className="absolute top-full mt-2 right-0 bg-white/95 backdrop-blur-xl border border-white/40 rounded-2xl shadow-xl min-w-[200px] z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
-                    {(Object.keys(INSTRUMENT_CONFIGS) as InstrumentType[]).map((instrument) => {
-                      const config = INSTRUMENT_CONFIGS[instrument];
-                      return (
-                        <button
-                          key={instrument}
-                          onClick={() => {
-                            setSelectedInstrument(instrument);
-                            setShowInstrumentMenu(false);
-                          }}
-                          className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-100/50 transition-colors first:rounded-t-2xl last:rounded-b-2xl ${selectedInstrument === instrument ? 'bg-slate-100/70' : ''
-                            }`}
-                        >
-                          <span className="text-2xl">{config.icon}</span>
-                          <div className="text-left flex-1">
-                            <div className="text-sm font-bold text-slate-700">{config.nameChinese}</div>
-                            <div className="text-xs text-slate-500">{config.name}</div>
-                          </div>
-                          {selectedInstrument === instrument && (
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-emerald-500">
-                              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-
             {/* Mode Switcher */}
             <div className="flex bg-white/40 rounded-full p-1 backdrop-blur-md border border-white/30 mr-2">
               <button
@@ -399,6 +377,66 @@ function App() {
                 onChange={(e) => setSensitivity(parseFloat(e.target.value))}
                 className="w-20 md:w-24 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-500"
               />
+            </div>
+
+            {/* Noise Suppression Controls */}
+            <div className="flex items-center gap-2 bg-white/40 rounded-full px-4 py-2 backdrop-blur-md border border-white/30 mr-2">
+              <button
+                onClick={() => setNoiseSuppression({ ...noiseSuppression, enabled: !noiseSuppression.enabled })}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-all ${noiseSuppression.enabled
+                  ? 'bg-emerald-100 text-emerald-600 border-emerald-200'
+                  : 'bg-slate-100 text-slate-400 border-slate-200'
+                  }`}
+                title={`噪音抑制 ${noiseSuppression.enabled ? '開啟' : '關閉'}`}
+              >
+                🔇
+              </button>
+              {noiseSuppression.enabled && (
+                <>
+                  <div className="h-4 w-px bg-slate-300"></div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">濾波</span>
+                    <input
+                      type="range"
+                      min="50"
+                      max="300"
+                      step="10"
+                      value={noiseSuppression.highPassCutoff}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        setNoiseSuppression({ ...noiseSuppression, highPassCutoff: value });
+                        if (isStarted && engineRef.current) {
+                          engineRef.current.setHighPassCutoff(value);
+                        }
+                      }}
+                      className="w-16 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      title={`高通濾波器: ${noiseSuppression.highPassCutoff}Hz`}
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono w-9">{noiseSuppression.highPassCutoff}</span>
+                  </div>
+                  <div className="h-4 w-px bg-slate-300"></div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">門限</span>
+                    <input
+                      type="range"
+                      min="0.002"
+                      max="0.05"
+                      step="0.001"
+                      value={noiseSuppression.noiseGateThreshold}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value);
+                        setNoiseSuppression({ ...noiseSuppression, noiseGateThreshold: value });
+                        if (isStarted && engineRef.current) {
+                          engineRef.current.setNoiseGateThreshold(value);
+                        }
+                      }}
+                      className="w-16 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      title={`噪音門限: ${(noiseSuppression.noiseGateThreshold * 100).toFixed(1)}%`}
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono w-9">{(noiseSuppression.noiseGateThreshold * 100).toFixed(1)}%</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Theme Select */}
@@ -552,6 +590,81 @@ function App() {
                     />
                   </div>
                 )}
+
+                {/* Spectrum Info Panel - Bottom Left */}
+                {mode === 'analysis' && (
+                  <div className="absolute bottom-4 left-4 z-20">
+                    <input type="checkbox" id="spectrumInfo" className="peer hidden" />
+
+                    {/* Collapsed State - Icon Button */}
+                    <label
+                      htmlFor="spectrumInfo"
+                      className="peer-checked:hidden flex items-center gap-2 bg-white/80 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/40 shadow-lg cursor-pointer hover:bg-white/95 transition-all"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-slate-600">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                      </svg>
+                      <span className="text-xs font-bold text-slate-600">頻譜說明</span>
+                    </label>
+
+                    {/* Expanded State - Info Panel */}
+                    <div className="hidden peer-checked:block bg-white/90 backdrop-blur-md rounded-2xl p-4 border border-white/40 shadow-2xl max-w-xs">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-500">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.348 14.651a3.75 3.75 0 010-5.303m5.304 0a3.75 3.75 0 010 5.303m-7.425 2.122a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.98 0 13.789" />
+                          </svg>
+                          極光頻譜解說
+                        </h4>
+                        <label htmlFor="spectrumInfo" className="cursor-pointer p-1 hover:bg-slate-100 rounded-full transition-colors">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-slate-400">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </label>
+                      </div>
+
+                      <div className="space-y-2 text-xs">
+                        {/* Axis Explanation */}
+                        <div className="bg-gradient-to-r from-slate-50 to-transparent rounded-lg p-2 border-l-2 border-slate-300">
+                          <div className="font-bold text-slate-700 mb-1">📊 座標軸</div>
+                          <div className="text-slate-600 space-y-0.5">
+                            <div>• <span className="font-semibold">橫軸</span>: 低音 → 高音 (50-4000 Hz)</div>
+                            <div>• <span className="font-semibold">高度</span>: 該頻率的音量強度</div>
+                          </div>
+                        </div>
+
+                        {/* Frequency Ranges */}
+                        <div className="bg-gradient-to-r from-emerald-50 to-transparent rounded-lg p-2 border-l-2 border-emerald-400">
+                          <div className="font-bold text-emerald-700 mb-1">🟢 左側 (50-500 Hz)</div>
+                          <div className="text-slate-600">低音、基頻、環境噪音</div>
+                        </div>
+
+                        <div className="bg-gradient-to-r from-cyan-50 to-transparent rounded-lg p-2 border-l-2 border-cyan-400">
+                          <div className="font-bold text-cyan-700 mb-1">🔵 中間 (500-2000 Hz)</div>
+                          <div className="text-slate-600">直笛/長笛核心音域 ⭐</div>
+                        </div>
+
+                        <div className="bg-gradient-to-r from-purple-50 to-transparent rounded-lg p-2 border-l-2 border-purple-400">
+                          <div className="font-bold text-purple-700 mb-1">🟣 右側 (2000+ Hz)</div>
+                          <div className="text-slate-600">泛音、明亮度、空氣感</div>
+                        </div>
+
+                        {/* Tip */}
+                        <div className="bg-amber-50 rounded-lg p-2 border border-amber-200 mt-3">
+                          <div className="font-bold text-amber-700 mb-1 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                            </svg>
+                            提示
+                          </div>
+                          <div className="text-xs text-amber-800">
+                            直笛吹奏時，主要能量應集中在<span className="font-bold">中間區域</span>。若左側過高，請提高噪音濾波器！
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -615,6 +728,7 @@ function App() {
             </div>
           </div>
 
+
           {/* Right Column (4 cols) - Camera & Details */}
           <div className="lg:col-span-4 flex flex-col gap-6 md:gap-8">
 
@@ -622,8 +736,12 @@ function App() {
             <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-2 shadow-sm">
               <div className="flex justify-between items-center px-4 py-2">
                 <div>
-                  <h3 className="text-base font-bold text-slate-700">嘴型監測</h3>
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Embouchure Cam</p>
+                  <h3 className="text-base font-bold text-slate-700">
+                    {selectedInstrument === 'vocal' ? '嘴型監測' : '演奏姿勢'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    {selectedInstrument === 'vocal' ? 'Embouchure Cam' : 'Posture Monitor'}
+                  </p>
                 </div>
                 <button
                   onClick={() => setShowCamera(!showCamera)}
@@ -632,30 +750,187 @@ function App() {
                   {showCamera ? 'ON' : 'OFF'}
                 </button>
               </div>
-              <div className="bg-black/5 rounded-[2rem] overflow-hidden aspect-[4/3] relative">
+              <div className="bg-black/5 rounded-[2rem] overflow-hidden aspect-[3/4] relative">
                 {showCamera ? (
-                  <CameraView onMetricsUpdate={setEmbouchureMetrics} />
+                  <CameraView
+                    monitoringMode={INSTRUMENT_CONFIGS[selectedInstrument].monitoringMode}
+                    onMetricsUpdate={setEmbouchureMetrics}
+                  />
                 ) : (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400">
                     <span className="text-sm font-medium">相機已暫停</span>
                   </div>
                 )}
 
-                {/* Floating Metrics Overlay */}
-                <div className="absolute bottom-4 left-4 right-4 grid grid-cols-2 gap-2">
-                  <div className="bg-white/20 backdrop-blur-md rounded-2xl p-3 border border-white/30 text-center">
-                    <span className="text-[10px] uppercase text-white/80 font-bold block">開口大小</span>
-                    <span className="text-lg font-mono text-white font-medium drop-shadow-md">
-                      {embouchureMetrics ? embouchureMetrics.aperture.toFixed(1) : '--'}
+                {/* Floating Metrics Overlay - Mode Specific */}
+                <div className={`absolute bottom-4 left-4 right-4 grid gap-2 ${embouchureMetrics?.mode === 'flute' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  {embouchureMetrics?.mode === 'vocal' && embouchureMetrics.vocal && (
+                    <>
+                      <div className="bg-white/20 backdrop-blur-md rounded-2xl p-3 border border-white/30 text-center">
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">開口大小</span>
+                        <span className="text-lg font-mono text-white font-medium drop-shadow-md">
+                          {embouchureMetrics.vocal.aperture.toFixed(1)}
+                        </span>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-md rounded-2xl p-3 border border-white/30 text-center">
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">嘴巴寬度</span>
+                        <span className="text-lg font-mono text-white font-medium drop-shadow-md">
+                          {embouchureMetrics.vocal.width.toFixed(1)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                  {embouchureMetrics?.mode === 'flute' && embouchureMetrics.flute && (
+                    <>
+                      <div className={`bg-white/20 backdrop-blur-md rounded-2xl p-3 border ${embouchureMetrics.flute.isTooTight ? 'border-red-400' : 'border-white/30'
+                        } text-center`}>
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">嘴角狀態</span>
+                        <span className={`text-lg font-mono font-medium drop-shadow-md ${embouchureMetrics.flute.isTooTight ? 'text-red-300' : 'text-white'
+                          }`}>
+                          {embouchureMetrics.flute.isTooTight ? '過緊' : '正常'}
+                        </span>
+                      </div>
+                      <div className={`bg-white/20 backdrop-blur-md rounded-2xl p-3 border ${embouchureMetrics.flute.isTooSmall ? 'border-red-400' : 'border-white/30'
+                        } text-center`}>
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">嘴型開口</span>
+                        <span className={`text-lg font-mono font-medium drop-shadow-md ${embouchureMetrics.flute.isTooSmall ? 'text-red-300' : 'text-white'
+                          }`}>
+                          {embouchureMetrics.flute.isTooSmall ? '太小' : '正常'}
+                        </span>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-md rounded-2xl p-3 border border-white/30 text-center">
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">上唇張力</span>
+                        <span className="text-lg font-mono text-white font-medium drop-shadow-md">
+                          {(embouchureMetrics.flute.upperLipTension * 100).toFixed(0)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
+                  {embouchureMetrics?.mode === 'reed' && embouchureMetrics.reed && (
+                    <>
+                      <div className={`bg-white/20 backdrop-blur-md rounded-2xl p-3 border ${embouchureMetrics.reed.isPuffingCheeks ? 'border-red-400' : 'border-white/30'
+                        } text-center`}>
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">臉頰狀態</span>
+                        <span className={`text-lg font-mono font-medium drop-shadow-md ${embouchureMetrics.reed.isPuffingCheeks ? 'text-red-300' : 'text-white'
+                          }`}>
+                          {embouchureMetrics.reed.isPuffingCheeks ? '鼓腮' : '正常'}
+                        </span>
+                      </div>
+                      <div className={`bg-white/20 backdrop-blur-md rounded-2xl p-3 border ${embouchureMetrics.reed.isJawTight ? 'border-yellow-400' : 'border-white/30'
+                        } text-center`}>
+                        <span className="text-[10px] uppercase text-white/80 font-bold block">下顎放鬆</span>
+                        <span className={`text-lg font-mono font-medium drop-shadow-md ${embouchureMetrics.reed.isJawTight ? 'text-yellow-300' : 'text-white'
+                          }`}>
+                          {(embouchureMetrics.reed.jawlineRelaxation * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Tone Resonance Panel - 只針對樂器顯示 */}
+            {selectedInstrument !== 'vocal' && toneResonance && isStarted && (
+              <div className="bg-gradient-to-br from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 shadow-sm">
+                <h3 className="text-base font-bold text-slate-700 mb-4 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-purple-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.348 14.651a3.75 3.75 0 010-5.303m5.304 0a3.75 3.75 0 010 5.303m-7.425 2.122a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.98 0 13.789" />
+                  </svg>
+                  口腔共鳴分析
+                </h3>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-4">Oral Cavity Resonance</p>
+
+                {/* Resonance Quality Bar */}
+                <div className={`mb-4 p-4 rounded-xl ${toneResonance.quality === 'balanced' ? 'bg-gradient-to-r from-emerald-50 to-cyan-50 border-2 border-emerald-200' :
+                  toneResonance.quality === 'warm' ? ' bg-gradient-to-r from-cyan-50 to-blue-50 border-2 border-cyan-200' :
+                    toneResonance.quality === 'bright' ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200' :
+                      'bg-gradient-to-r from-red-50 to-pink-50 border-2 border-red-200'
+                  }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-bold text-slate-700">音色品質</span>
+                    <span className={`text-xs px-3 py-1 rounded-full font-bold ${toneResonance.quality === 'balanced' ? 'bg-emerald-100 text-emerald-700' :
+                      toneResonance.quality === 'warm' ? 'bg-cyan-100 text-cyan-700' :
+                        toneResonance.quality === 'bright' ? 'bg-amber-100 text-amber-700' :
+                          'bg-red-100 text-red-700'
+                      }`}>
+                      {toneResonance.quality === 'balanced' ? '理想 ⭐' :
+                        toneResonance.quality === 'warm' ? '溫暖' :
+                          toneResonance.quality === 'bright' ? '明亮' : '刺耳'}
                     </span>
                   </div>
-                  <div className="bg-white/20 backdrop-blur-md rounded-2xl p-3 border border-white/30 text-center">
-                    <span className="text-[10px] uppercase text-white/80 font-bold block">嘴巴寬度</span>
-                    <span className="text-lg font-mono text-white font-medium drop-shadow-md">
-                      {embouchureMetrics ? embouchureMetrics.width.toFixed(1) : '--'}
-                    </span>
+
+                  {/* Progress Bar */}
+                  <div className="w-full bg-white/50 rounded-full h-3 mb-3 overflow-hidden">
+                    <div
+                      className={`h-3 rounded-full transition-all duration-500 ${toneResonance.quality === 'balanced' ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' :
+                        toneResonance.quality === 'warm' ? 'bg-gradient-to-r from-cyan-400 to-blue-400' :
+                          toneResonance.quality === 'bright' ? 'bg-gradient-to-r from-amber-400 to-orange-400' :
+                            'bg-gradient-to-r from-red-400 to-pink-400'
+                        }`}
+                      style={{ width: `${toneResonance.score}%` }}
+                    />
+                  </div>
+
+                  {/* Advice */}
+                  <p className={`text-xs font-medium ${toneResonance.quality === 'balanced' || toneResonance.quality === 'warm' ? 'text-emerald-700' : 'text-amber-700'
+                    }`}>
+                    💡 {toneResonance.advice}
+                  </p>
+                </div>
+
+                {/* Technical Info */}
+                <div className="bg-slate-50/50 rounded-xl p-3 border border-slate-200">
+                  <div className="text-xs text-slate-500 flex items-center justify-between">
+                    <span className="font-bold">頻譜質心</span>
+                    <span className="font-mono text-slate-600">{toneResonance.centroid.toFixed(0)} Hz</span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-400">
+                    理想範圍: 800-1500 Hz（口腔打開狀態）
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Instrument Selector */}
+            <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="mb-4">
+                <h3 className="text-lg font-bold text-slate-700 mb-1">樂器選擇</h3>
+                <p className="text-xs text-slate-400 uppercase tracking-widest">Instrument</p>
+              </div>
+
+              <div className="space-y-2">
+                {(Object.keys(INSTRUMENT_CONFIGS) as InstrumentType[]).map((instrument) => {
+                  const config = INSTRUMENT_CONFIGS[instrument];
+                  const isSelected = selectedInstrument === instrument;
+                  return (
+                    <button
+                      key={instrument}
+                      onClick={() => setSelectedInstrument(instrument)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${isSelected
+                        ? 'bg-gradient-to-r from-white/80 to-white/60 border-2 border-emerald-400 shadow-md'
+                        : 'bg-white/40 hover:bg-white/60 border border-white/30'
+                        }`}
+                    >
+                      {/* Gradient Badge Icon */}
+                      <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${config.icon} flex items-center justify-center shadow-md`}>
+                        <span className="text-white font-black text-xs">{config.iconText}</span>
+                      </div>
+                      <div className="text-left flex-1">
+                        <div className={`text-sm font-bold ${isSelected ? 'text-emerald-700' : 'text-slate-700'
+                          }`}>{config.nameChinese}</div>
+                        <div className="text-xs text-slate-500">{config.name}</div>
+                      </div>
+                      {isSelected && (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-emerald-500">
+                          <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

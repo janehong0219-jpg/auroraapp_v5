@@ -1,19 +1,19 @@
 import { db } from "../firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import type { EmbouchureMetrics } from "./embouchureLogic";
+import type { UnifiedEmbouchureMetrics } from "./embouchureLogic";
 import type { NoteData } from "../utils/noteUtils";
 
 export interface AnalysisLog {
     timestamp: any; // ServerTimestamp
     note: NoteData | null;
-    embouchure: EmbouchureMetrics | null;
+    embouchure: UnifiedEmbouchureMetrics | null;
     harmonics: { f1: number; f2: number; f3: number; score: number } | null;
     pitchStability: number | null;
 }
 
 export const saveAnalysisLog = async (
     note: NoteData | null,
-    embouchure: EmbouchureMetrics | null,
+    embouchure: UnifiedEmbouchureMetrics | null,
     harmonics: { f1: number; f2: number; f3: number; score: number } | null,
     pitchStability: number | null
 ) => {

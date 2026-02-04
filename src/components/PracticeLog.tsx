@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { checkIn, addSong, removeSong, updateNotes, getTodayLog, getPracticeLogs, getPracticeStreak, type PracticeLogData, type PracticeSong } from '../ai/PracticeService';
+import { checkIn, addSong, removeSong, updateNotes, getTodayLog, getLogByDate, getPracticeLogs, getPracticeStreak, type PracticeLogData, type PracticeSong } from '../ai/PracticeService';
 
 interface PracticeLogProps {
     isOpen: boolean;
@@ -24,6 +24,8 @@ const encouragingMessages = [
 
 export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality }: PracticeLogProps) {
     const [todayLog, setTodayLog] = useState<PracticeLogData | null>(null);
+    const [viewingLog, setViewingLog] = useState<PracticeLogData | null>(null);
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [newSongName, setNewSongName] = useState('');
     const [notes, setNotes] = useState('');
     const [streak, setStreak] = useState(0);
@@ -51,7 +53,12 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
         const log = await getTodayLog();
         setTodayLog(log);
         setIsCheckedIn(log?.checkedIn || false);
-        setNotes(log?.notes || '');
+
+        // If no date is selected, show today's data
+        if (!selectedDate) {
+            setViewingLog(log);
+            setNotes(log?.notes || '');
+        }
 
         const streakCount = await getPracticeStreak();
         setStreak(streakCount);
@@ -94,6 +101,28 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
 
     const randomMessage = encouragingMessages[Math.floor(Math.random() * encouragingMessages.length)];
 
+    const handleDateClick = async (date: Date, hasLog: boolean) => {
+        if (!hasLog) return; // Only allow clicking on dates with logs
+
+        setSelectedDate(date);
+        const log = await getLogByDate(date);
+        setViewingLog(log);
+        setNotes(log?.notes || '');
+    };
+
+    const handleBackToToday = () => {
+        setSelectedDate(null);
+        setViewingLog(todayLog);
+        setNotes(todayLog?.notes || '');
+    };
+
+    const isViewingToday = !selectedDate;
+    const displayLog = viewingLog || todayLog;
+
+    const formatSelectedDate = (date: Date) => {
+        return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+    };
+
     // Generate calendar for the last 30 days
     const generateCalendar = () => {
         const days = [];
@@ -104,11 +133,15 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
             date.setDate(today.getDate() - i);
             const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
             const log = recentLogs.get(dateKey);
+            const hasLog = log?.checkedIn || false;
 
             days.push({
                 date: date.getDate(),
+                fullDate: new Date(date),
+                dateKey,
                 isToday: i === 0,
-                checkedIn: log?.checkedIn || false,
+                checkedIn: hasLog,
+                isSelected: selectedDate && dateKey === `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`,
             });
         }
 
@@ -136,7 +169,9 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
                             <h2 className={`text-2xl font-bold bg-gradient-to-r ${themeColors[theme]} bg-clip-text text-transparent`}>
                                 練習日誌
                             </h2>
-                            <p className="text-sm text-slate-500 mt-1">記錄你的音樂旅程 🎵</p>
+                            <p className="text-sm text-slate-500 mt-1">
+                                {selectedDate ? `📅 ${formatSelectedDate(selectedDate)}` : '記錄你的音樂旅程 🎵'}
+                            </p>
                         </div>
                         <button
                             onClick={onClose}
@@ -148,24 +183,39 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
                         </button>
                     </div>
 
+                    {/* Back to Today Button */}
+                    {!isViewingToday && (
+                        <div className="mb-4">
+                            <button
+                                onClick={handleBackToToday}
+                                className="w-full bg-slate-100 text-slate-700 px-4 py-2 rounded-xl font-medium hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                                </svg>
+                                返回今天
+                            </button>
+                        </div>
+                    )}
+
                     {/* Check-in Section */}
-                    <div className={`${themeBg[theme]} rounded-3xl p-6 mb-6 relative overflow-hidden`}>
+                    <div className={`${isViewingToday ? themeBg[theme] : 'bg-slate-100'} rounded-3xl p-6 mb-6 relative overflow-hidden`}>
                         {showSuccessAnimation && (
                             <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/20 to-cyan-400/20 animate-pulse" />
                         )}
 
                         <div className="relative z-10">
                             <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-slate-700">今日練習</h3>
+                                <h3 className="text-lg font-bold text-slate-700">{isViewingToday ? '今日練習' : '練習記錄'}</h3>
                                 <div className="flex gap-2">
-                                    {todayLog?.toneQuality && (
+                                    {displayLog?.toneQuality && (
                                         <div className="flex items-center gap-1 bg-white/80 px-3 py-1 rounded-full">
                                             <span className="text-xs text-slate-500">音色</span>
-                                            <span className={`text-sm font-bold ${todayLog.toneQuality.overall >= 80 ? 'text-emerald-500' :
-                                                    todayLog.toneQuality.overall >= 60 ? 'text-cyan-500' :
-                                                        'text-amber-500'
+                                            <span className={`text-sm font-bold ${displayLog.toneQuality.overall >= 80 ? 'text-emerald-500' :
+                                                displayLog.toneQuality.overall >= 60 ? 'text-cyan-500' :
+                                                    'text-amber-500'
                                                 }`}>
-                                                {Math.round(todayLog.toneQuality.overall)}%
+                                                {Math.round(displayLog.toneQuality.overall)}%
                                             </span>
                                         </div>
                                     )}
@@ -178,14 +228,14 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
                                 </div>
                             </div>
 
-                            {!isCheckedIn ? (
+                            {isViewingToday && !isCheckedIn ? (
                                 <button
                                     onClick={handleCheckIn}
                                     className={`w-full bg-gradient-to-r ${themeColors[theme]} text-white px-6 py-4 rounded-2xl font-bold text-lg shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all`}
                                 >
                                     今天已練習 ✓
                                 </button>
-                            ) : (
+                            ) : (displayLog?.checkedIn || isCheckedIn) ? (
                                 <div className="text-center py-3">
                                     <div className="text-5xl mb-2">🎉</div>
                                     <p className="text-lg font-bold text-slate-700">{randomMessage}</p>
@@ -206,64 +256,82 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
                                         </div>
                                     )}
                                 </div>
+                            ) : (
+                                <div className="text-center py-3">
+                                    <p className="text-slate-500">此日期沒有練習記錄</p>
+                                </div>
                             )}
                         </div>
                     </div>
 
                     {/* Songs Section */}
                     <div className="bg-slate-50 rounded-3xl p-6 mb-6">
-                        <h3 className="text-lg font-bold text-slate-700 mb-4">練習曲目</h3>
+                        <h3 className="text-lg font-bold text-slate-700 mb-4">
+                            練習曲目
+                            {!isViewingToday && <span className="text-xs font-normal text-slate-400 ml-2">(唯讀)</span>}
+                        </h3>
 
-                        <div className="flex gap-2 mb-4">
-                            <input
-                                type="text"
-                                value={newSongName}
-                                onChange={(e) => setNewSongName(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddSong()}
-                                placeholder="曲子名稱..."
-                                className="flex-1 px-4 py-3 rounded-xl bg-white border-2 border-slate-200 focus:border-slate-300 outline-none transition-colors text-slate-700"
-                            />
-                            <button
-                                onClick={handleAddSong}
-                                className={`bg-gradient-to-r ${themeColors[theme]} text-white px-6 py-3 rounded-xl font-bold shadow-md hover:shadow-lg transition-all`}
-                            >
-                                +
-                            </button>
-                        </div>
+                        {isViewingToday && (
+                            <div className="flex gap-2 mb-4">
+                                <input
+                                    type="text"
+                                    value={newSongName}
+                                    onChange={(e) => setNewSongName(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && handleAddSong()}
+                                    placeholder="曲子名稱..."
+                                    className="flex-1 px-4 py-3 rounded-xl bg-white border-2 border-slate-200 focus:border-slate-300 outline-none transition-colors text-slate-700"
+                                />
+                                <button
+                                    onClick={handleAddSong}
+                                    className={`bg-gradient-to-r ${themeColors[theme]} text-white px-6 py-3 rounded-xl font-bold shadow-md hover:shadow-lg transition-all`}
+                                >
+                                    +
+                                </button>
+                            </div>
+                        )}
 
                         <div className="space-y-2">
-                            {todayLog?.songs.map((song, index) => (
+                            {displayLog?.songs.map((song, index) => (
                                 <div
                                     key={index}
                                     className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-slate-200 group hover:border-slate-300 transition-colors"
                                 >
                                     <span className="text-slate-700 font-medium">{song.name}</span>
-                                    <button
-                                        onClick={() => handleRemoveSong(index)}
-                                        className="text-slate-300 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
+                                    {isViewingToday && (
+                                        <button
+                                            onClick={() => handleRemoveSong(index)}
+                                            className="text-slate-300 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </div>
 
-                        {(!todayLog?.songs || todayLog.songs.length === 0) && (
+                        {(!displayLog?.songs || displayLog.songs.length === 0) && (
                             <p className="text-center text-slate-400 text-sm py-8">還沒有練習曲目喔～</p>
                         )}
                     </div>
 
                     {/* Notes Section */}
                     <div className="bg-slate-50 rounded-3xl p-6 mb-6">
-                        <h3 className="text-lg font-bold text-slate-700 mb-4">練習筆記</h3>
+                        <h3 className="text-lg font-bold text-slate-700 mb-4">
+                            練習筆記
+                            {!isViewingToday && <span className="text-xs font-normal text-slate-400 ml-2">(唯讀)</span>}
+                        </h3>
                         <textarea
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            onBlur={handleNotesBlur}
+                            onBlur={isViewingToday ? handleNotesBlur : undefined}
                             placeholder="今天的感想、目標或想記錄的事..."
-                            className="w-full h-32 px-4 py-3 rounded-xl bg-white border-2 border-slate-200 focus:border-slate-300 outline-none transition-colors resize-none text-slate-700"
+                            disabled={!isViewingToday}
+                            className={`w-full h-32 px-4 py-3 rounded-xl border-2 outline-none transition-colors resize-none ${isViewingToday
+                                ? 'bg-white border-slate-200 focus:border-slate-300 text-slate-700'
+                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                }`}
                         />
                     </div>
 
@@ -274,10 +342,13 @@ export default function PracticeLog({ isOpen, onClose, theme, currentToneQuality
                             {generateCalendar().map((day, index) => (
                                 <div
                                     key={index}
+                                    onClick={() => day.checkedIn && handleDateClick(day.fullDate, day.checkedIn)}
                                     className={`aspect-square rounded-lg flex items-center justify-center text-sm font-medium transition-all ${day.checkedIn
-                                        ? `bg-gradient-to-br ${themeColors[theme]} text-white shadow-md`
-                                        : 'bg-white text-slate-300 border border-slate-200'
-                                        } ${day.isToday ? 'ring-2 ring-slate-400 ring-offset-2' : ''}`}
+                                            ? `bg-gradient-to-br ${themeColors[theme]} text-white shadow-md cursor-pointer hover:scale-110`
+                                            : 'bg-white text-slate-300 border border-slate-200'
+                                        } ${day.isToday ? 'ring-2 ring-slate-400 ring-offset-2' : ''
+                                        } ${day.isSelected ? 'ring-2 ring-purple-500 ring-offset-2 scale-110' : ''
+                                        }`}
                                 >
                                     {day.date}
                                 </div>
