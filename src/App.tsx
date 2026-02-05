@@ -36,10 +36,10 @@ function App() {
   const recordedChunksRef = useRef<Blob[]>([]);
 
   // Theme & UI
-  const [theme, setTheme] = useState<VisualizerTheme>('aurora');
+  const [theme] = useState<VisualizerTheme>('aurora');
   const [mode, setMode] = useState<AppMode>('analysis');
-  const [showUsage, setShowUsage] = useState(true);
-  const [sensitivity, setSensitivity] = useState(1.5);
+  // const [showUsage, setShowUsage] = useState(true);
+  const [sensitivity] = useState(1.5);
   const [showPracticeLog, setShowPracticeLog] = useState(false);
   const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('vocal');
   const [showAnalyticsDashboard, setShowAnalyticsDashboard] = useState(false);
@@ -262,56 +262,8 @@ function App() {
     }
   };
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      // Stop
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-    } else {
-      // Start - Need to combine streams if we want video + audio
-      // For simplicity v2: Just record audio context destination or stream if possible.
-      // A better approach for "App Recording" is capturing the canvas stream + audio stream.
-      // For now, let's try to capture the screen or just the audio if simple.
-      // Let's go with effective "Session Recording" -> Audio + Camera Stream if available?
-      // Actually, easiest is capturing the provided streams.
+  // toggleRecording removed as unused
 
-      try {
-
-        // Note: engineRef stream is input. To record "what is played", we need the input stream.
-        // Let's use the input stream from getUserMedia if we have it stored? 
-        // Accessing internal stream might be hard. 
-        // Alternative: use displayMedia for full screen record (best for visualizer app)
-
-        navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }).then(stream => {
-          const mediaRecorder = new MediaRecorder(stream);
-          mediaRecorderRef.current = mediaRecorder;
-          recordedChunksRef.current = [];
-
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-          };
-
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `aurora-session-${new Date().toISOString()}.webm`;
-            a.click();
-          };
-
-          mediaRecorder.start();
-          setIsRecording(true);
-        }).catch(e => {
-          console.error("Screen capture failed", e);
-          alert("錄製需要螢幕錄製權限");
-        });
-
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  };
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -430,8 +382,8 @@ function App() {
             <button
               onClick={() => setDarkMode(!darkMode)}
               className={`w-11 h-11 rounded-full border flex items-center justify-center transition-all ${darkMode
-                  ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700'
-                  : 'bg-white border-slate-100 text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700'
+                : 'bg-white border-slate-100 text-slate-400 hover:text-slate-600 hover:bg-slate-50'
                 }`}
               title={darkMode ? "切換至日間模式" : "切換至夜間模式"}
             >
@@ -645,7 +597,7 @@ function App() {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <span className={`text-2xl font-black ${toneResonance.quality === 'balanced' ? 'text-emerald-500' :
-                          toneResonance.quality === 'warm' ? 'text-blue-500' : 'text-amber-500'
+                        toneResonance.quality === 'warm' ? 'text-blue-500' : 'text-amber-500'
                         }`}>
                         {toneResonance.quality === 'balanced' ? '均衡完美' :
                           toneResonance.quality === 'warm' ? '溫暖厚實' :
@@ -771,8 +723,8 @@ function App() {
                       key={instrument}
                       onClick={() => setSelectedInstrument(instrument)}
                       className={`relative p-3 rounded-2xl border transition-all duration-200 text-left group ${isSelected
-                          ? 'bg-slate-800 border-slate-800 text-white shadow-lg transform scale-[1.02]'
-                          : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-750'
+                        ? 'bg-slate-800 border-slate-800 text-white shadow-lg transform scale-[1.02]'
+                        : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-750'
                         }`}
                     >
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black mb-2 ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
@@ -794,8 +746,8 @@ function App() {
             {/* Suggestions Box (Harmonics based) */}
             {toneSuggestion && (
               <div className={`${cardClass} p-6 border-l-4 ${toneSuggestion.type === 'excellent' ? 'border-l-emerald-400' :
-                  toneSuggestion.type === 'good' ? 'border-l-cyan-400' :
-                    toneSuggestion.type === 'needsWork' ? 'border-l-amber-400' : 'border-l-rose-400'
+                toneSuggestion.type === 'good' ? 'border-l-cyan-400' :
+                  toneSuggestion.type === 'needsWork' ? 'border-l-amber-400' : 'border-l-rose-400'
                 }`}>
                 <div className="flex items-start gap-4">
                   <div className="text-3xl">{toneSuggestion.icon}</div>
