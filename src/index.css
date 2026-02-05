@@ -1,4 +1,9 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
+
+/* Force dark mode variant for Tailwind v4 if config is tricky */
+@custom-variant dark (&:where(.dark, .dark *));
+
 
 :root {
   font-family: 'Outfit', Inter, system-ui, sans-serif;
@@ -6,11 +11,12 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light;
-  color: #475569;
-  /* Slate-600 soft text */
-  background-color: #FDF4FF;
-  /* Very light pink/lavender base */
+  color-scheme: light dark;
+
+  /* Color and background are handled by App.tsx themes now */
+  /* color: #475569; */
+  /* background-color: #FDF4FF; */
+
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
