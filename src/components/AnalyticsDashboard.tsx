@@ -96,7 +96,14 @@ export function AnalyticsDashboard({ onClose }: AnalyticsDashboardProps) {
             console.log(`📊 總計 ${testSessions.length} 筆測試數據`);
 
             // 儲存到 LocalStorage（本地存儲，不需要網路）
-            await uploadPracticeSessionsLocal(testSessions, 10, (uploaded, total) => {
+            // 修正類型不匹配問題：確保 instrument 被視為 InstrumentType，並確保整體類型符合 PracticeSession
+            const validSessions = testSessions.map(session => ({
+                ...session,
+                instrument: session.instrument as any, // 強制轉型以避免字串/枚舉類型衝突
+                practiceType: session.practiceType as any // 確保練習類型也被正確視為枚舉
+            }));
+
+            await uploadPracticeSessionsLocal(validSessions as any[], 10, (uploaded, total) => {
                 setUploadProgress(50 + (uploaded / total) * 50);
             });
 

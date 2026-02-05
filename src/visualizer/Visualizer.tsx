@@ -248,7 +248,7 @@ const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({
     };
 
     // Draw stability indicator
-    const drawStabilityIndicator = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const drawStabilityIndicator = (ctx: CanvasRenderingContext2D, width: number, _height: number) => {
         const indicatorSize = 40;
         const x = width - indicatorSize - 15;
         const y = 15;

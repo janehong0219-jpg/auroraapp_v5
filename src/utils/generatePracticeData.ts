@@ -329,8 +329,8 @@ export function exportToJSON(sessions: PracticeSession[]): string {
     }, null, 2);
 }
 
-// 可選：命令列測試
-if (typeof window === 'undefined' && typeof process !== 'undefined') {
+// 可選：命令列測試 (僅在非瀏覽器環境執行)
+if (typeof window === 'undefined') {
     // Node.js 環境
     const sessions = generatePracticeData(100);
     const stats = calculateStatistics(sessions);

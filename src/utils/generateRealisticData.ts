@@ -202,7 +202,7 @@ function generateRealisticSession(
     // 練習筆記（偶爾添加）
     let notes: string | undefined;
     if (Math.random() < 0.12) {
-        notes = generatePracticeNote(skillLevel, overallScore, specialEvent);
+        notes = generatePracticeNote(overallScore, specialEvent);
     }
 
     return {
@@ -257,7 +257,6 @@ function selectPracticeType(
  * 生成練習筆記
  */
 function generatePracticeNote(
-    skillLevel: string,
     score: number,
     specialEvent: number
 ): string {
