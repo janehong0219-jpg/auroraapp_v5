@@ -1,18 +1,22 @@
 import { useRef, useEffect, useState } from 'react';
 import { FaceDetector } from '../ai/FaceDetector';
+import { PostureDetector, type ShoulderMetrics } from '../ai/PostureDetector';
 import { calculateUnifiedEmbouchure, type UnifiedEmbouchureMetrics } from '../ai/embouchureLogic';
 
 interface CameraViewProps {
     monitoringMode: 'vocal' | 'flute' | 'reed';
     onMetricsUpdate?: (metrics: UnifiedEmbouchureMetrics | null) => void;
+    onShoulderMetricsUpdate?: (metrics: ShoulderMetrics | null) => void;
 }
 
-export const CameraView: React.FC<CameraViewProps> = ({ monitoringMode, onMetricsUpdate }) => {
+export const CameraView: React.FC<CameraViewProps> = ({ monitoringMode, onMetricsUpdate, onShoulderMetricsUpdate }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isAiReady, setIsAiReady] = useState(false);
     const detectorRef = useRef<FaceDetector | null>(null);
+    const postureDetectorRef = useRef<PostureDetector | null>(null);
     const requestRef = useRef<number | null>(null);
+    const postureIntervalRef = useRef<any>(null);
 
     useEffect(() => {
         async function setupCamera() {
@@ -35,6 +39,35 @@ export const CameraView: React.FC<CameraViewProps> = ({ monitoringMode, onMetric
             const detector = new FaceDetector();
             await detector.init();
             detectorRef.current = detector;
+
+            // 初始化姿勢偵測器（僅長笛模式）
+            if (monitoringMode === 'flute') {
+                try {
+                    const postureDetector = new PostureDetector();
+                    await postureDetector.init();
+                    postureDetectorRef.current = postureDetector;
+                    console.log('✅ PostureDetector initialized');
+
+                    // 獨立的姿勢偵測循環 - 每3秒偵測一次（不阻塞渲染）
+                    postureIntervalRef.current = setInterval(async () => {
+                        if (postureDetectorRef.current && videoRef.current && videoRef.current.readyState === 4) {
+                            try {
+                                const metrics = await postureDetectorRef.current.detect(videoRef.current);
+                                if (metrics) {
+                                    if (onShoulderMetricsUpdate) {
+                                        onShoulderMetricsUpdate(metrics);
+                                    }
+                                }
+                            } catch (err) {
+                                console.warn('Posture detection error:', err);
+                            }
+                        }
+                    }, 3000); // 每3秒偵測一次
+                } catch (error) {
+                    console.warn('PostureDetector init failed:', error);
+                }
+            }
+
             setIsAiReady(true);
             detectLoop();
         }
@@ -43,6 +76,8 @@ export const CameraView: React.FC<CameraViewProps> = ({ monitoringMode, onMetric
 
         return () => {
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            if (postureIntervalRef.current) clearInterval(postureIntervalRef.current);
+            if (postureDetectorRef.current) postureDetectorRef.current.dispose();
             if (videoRef.current && videoRef.current.srcObject) {
                 const stream = videoRef.current.srcObject as MediaStream;
                 stream.getTracks().forEach(track => track.stop());

@@ -6,12 +6,14 @@ import { DiminuendoTrainer } from './components/DiminuendoTrainer'
 import { CameraView } from './components/CameraView'
 import PracticeLog from './components/PracticeLog'
 import TrebleClefIcon from './components/TrebleClefIcon'
+import { SimpleAnalyticsDashboard } from './components/SimpleAnalyticsDashboard'
 import { getNoteFromFrequency, type NoteData } from './utils/noteUtils'
 import { saveAnalysisLog } from './ai/AnalysisService'
 import { ToneAnalyzer, type ToneQuality, type ToneSuggestion } from './utils/ToneAnalyzer'
 import { PracticeDataBuffer, type PitchPoint, type VolumePoint } from './utils/PracticeDataBuffer'
 import { INSTRUMENT_CONFIGS, type InstrumentType } from './utils/InstrumentConfig'
 import { type UnifiedEmbouchureMetrics } from './ai/embouchureLogic'
+import { type ShoulderMetrics } from './ai/PostureDetector'
 
 interface HistoryItem {
   id: string;
@@ -40,6 +42,7 @@ function App() {
   const [sensitivity, setSensitivity] = useState(1.5);
   const [showPracticeLog, setShowPracticeLog] = useState(false);
   const [selectedInstrument, setSelectedInstrument] = useState<InstrumentType>('vocal');
+  const [showAnalyticsDashboard, setShowAnalyticsDashboard] = useState(false);
 
   // 噪音抑制設定
   const [noiseSuppression, setNoiseSuppression] = useState({
@@ -75,18 +78,34 @@ function App() {
     centroid: number;
   } | null>(null);
 
+  // 肩膀姿勢狀態
+  const [shoulderMetrics, setShoulderMetrics] = useState<ShoulderMetrics | null>(null);
+
   const [pitchStability, setPitchStability] = useState<number | null>(null);
   const pitchHistory = useRef<number[]>([]);
   const practiceBuffer = useRef<PracticeDataBuffer>(new PracticeDataBuffer());
   const [practiceStability, setPracticeStability] = useState<number>(0);
 
   useEffect(() => {
-    analyzerRef.current = new AudioAnalyzer(4096);
+    analyzerRef.current = new AudioAnalyzer(1024); // 最快響應速度
     engineRef.current = new AudioEngine();
 
     return () => {
       engineRef.current?.stop();
     };
+  }, []);
+
+  // 快捷鍵：Ctrl+Shift+A 開啟練習分析
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+        e.preventDefault();
+        setShowAnalyticsDashboard(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
   // Handle Mic Toggle
@@ -300,6 +319,11 @@ function App() {
       default: return 'from-emerald-600 to-cyan-600';
     }
   };
+
+  // 如果顯示分析儀表板，渲染覆蓋層
+  if (showAnalyticsDashboard) {
+    return <SimpleAnalyticsDashboard onClose={() => setShowAnalyticsDashboard(false)} />;
+  }
 
   return (
     <div className={`relative min-h-screen w-full overflow-x-hidden text-slate-700 selection:bg-cyan-200 transition-colors duration-700 ${theme === 'sunset' ? 'bg-[#fff7ed]' : theme === 'ocean' ? 'bg-[#f0f9ff]' : 'bg-[#fdfaff]'
@@ -541,16 +565,16 @@ function App() {
         )}
 
         {/* Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8 items-start pb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start pb-8">
 
-          {/* Left Column (8 cols) */}
-          <div className="lg:col-span-8 flex flex-col gap-6 md:gap-8">
+          {/* Left Column (1 col) */}
+          <div className="lg:col-span-1 flex flex-col gap-6">
 
             {/* Main Visualizer or Trainer */}
             <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-2 shadow-sm relative group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none"></div>
 
-              <div className="relative bg-white/40 rounded-[2rem] p-4 md:p-6 h-[18rem] md:h-[22rem]">
+              <div className="relative bg-white/40 rounded-[2rem] p-4 md:p-6 h-[40vh] min-h-[300px]">
                 {mode === 'analysis' ? (
                   <>
                     <div className="absolute top-4 md:top-6 left-6 md:left-8 z-10">
@@ -729,8 +753,8 @@ function App() {
           </div>
 
 
-          {/* Right Column (4 cols) - Camera & Details */}
-          <div className="lg:col-span-4 flex flex-col gap-6 md:gap-8">
+          {/* Right Column (1 col) */}
+          <div className="lg:col-span-1 flex flex-col gap-6">
 
             {/* Camera View */}
             <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-2 shadow-sm">
@@ -750,11 +774,12 @@ function App() {
                   {showCamera ? 'ON' : 'OFF'}
                 </button>
               </div>
-              <div className="bg-black/5 rounded-[2rem] overflow-hidden aspect-[3/4] relative">
+              <div className="bg-black/5 rounded-[2rem] overflow-hidden h-[40vh] min-h-[300px] relative">
                 {showCamera ? (
                   <CameraView
                     monitoringMode={INSTRUMENT_CONFIGS[selectedInstrument].monitoringMode}
                     onMetricsUpdate={setEmbouchureMetrics}
+                    onShoulderMetricsUpdate={setShoulderMetrics}
                   />
                 ) : (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -832,6 +857,57 @@ function App() {
               </div>
             </div>
 
+            {/* 肩膀姿勢狀態（僅長笛模式） */}
+            {selectedInstrument === 'flute' && showCamera && shoulderMetrics && (
+              <div className="mt-2 px-4 pb-3">
+                <div className={`rounded-2xl p-3 border ${shoulderMetrics.isRelaxed
+                  ? 'bg-emerald-50/80 border-emerald-200'
+                  : 'bg-red-50/80 border-red-200'
+                  }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">
+                        {shoulderMetrics.isRelaxed ? '💆' : '⚠️'}
+                      </span>
+                      <h4 className={`text-sm font-bold ${shoulderMetrics.isRelaxed ? 'text-emerald-700' : 'text-red-700'
+                        }`}>
+                        肩膀狀態
+                      </h4>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-full ${shoulderMetrics.isRelaxed
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-red-100 text-red-700'
+                      }`}>
+                      {shoulderMetrics.isRelaxed ? '放鬆' : '緊張'}
+                    </span>
+                  </div>
+
+                  {/* 緊張度進度條 */}
+                  <div className="mb-2">
+                    <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                      <span>緊張度</span>
+                      <span>{Math.round(shoulderMetrics.tensionLevel)}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-200/50 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 ${shoulderMetrics.isRelaxed ? 'bg-emerald-400' : 'bg-red-400'
+                          }`}
+                        style={{ width: `${Math.min(100, shoulderMetrics.tensionLevel)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 建議 */}
+                  {!shoulderMetrics.isRelaxed && (
+                    <p className="text-xs text-red-600">
+                      💡 {shoulderMetrics.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+
             {/* Advanced Tone Resonance Panel - 只針對樂器顯示 */}
             {selectedInstrument !== 'vocal' && toneResonance && isStarted && (
               <div className="bg-gradient-to-br from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 shadow-sm">
@@ -894,11 +970,90 @@ function App() {
               </div>
             )}
 
-            {/* Instrument Selector */}
-            <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
-              <div className="mb-4">
-                <h3 className="text-lg font-bold text-slate-700 mb-1">樂器選擇</h3>
-                <p className="text-xs text-slate-400 uppercase tracking-widest">Instrument</p>
+            {/* Harmonics / Tips - 移到樂器選擇上方 */}
+            <div className="bg-gradient-to-b from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-700 mb-1">泛音分析</h3>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest">Harmonic Analysis</p>
+                </div>
+                {toneQuality && (
+                  <div className="flex items-center gap-1 bg-white/50 px-3 py-1 rounded-full">
+                    <span className="text-xs font-bold text-slate-500">品質</span>
+                    <span className={`text-lg font-black ${toneQuality.overall >= 80 ? 'text-emerald-500' : toneQuality.overall >= 60 ? 'text-cyan-500' : 'text-amber-500'}`}>
+                      {toneQuality.overall}%
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-center items-end gap-4 h-24 mb-3">
+                {[
+                  { label: 'F1', val: harmonics?.f1, name: '基頻' },
+                  { label: 'F2', val: harmonics?.f2, name: '二次' },
+                  { label: 'F3', val: harmonics?.f3, name: '三次' }
+                ].map((bar, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1 group">
+                    <div className="w-8 bg-white/40 rounded-full relative h-24 flex items-end overflow-hidden p-1 shadow-inner">
+                      <div
+                        className={`w-full rounded-full transition-all duration-300 ${theme === 'sunset' ? 'bg-gradient-to-t from-orange-400 to-rose-300' :
+                          theme === 'ocean' ? 'bg-gradient-to-t from-blue-500 to-teal-300' :
+                            'bg-gradient-to-t from-emerald-400 to-cyan-300'
+                          }`}
+                        style={{ height: `${Math.min(((bar.val || 0) / 255) * 100 * (1 + i * 0.4), 100)}%` }}
+                      ></div>
+                    </div>
+                    <span className="text-xs font-bold text-slate-400">{bar.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Compact Tone Quality */}
+              {toneQuality && (
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="bg-white/30 rounded-lg p-2 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold">明亮</div>
+                    <div className="text-sm font-black text-slate-600">{toneQuality.brightness}%</div>
+                  </div>
+                  <div className="bg-white/30 rounded-lg p-2 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold">豐富</div>
+                    <div className="text-sm font-black text-slate-600">{toneQuality.richness}%</div>
+                  </div>
+                  <div className="bg-white/30 rounded-lg p-2 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold">平衡</div>
+                    <div className="text-sm font-black text-slate-600">{toneQuality.balance}%</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Smart Suggestion */}
+              {toneSuggestion ? (
+                <div className={`rounded-xl p-3 border ${toneSuggestion.type === 'excellent' ? 'bg-emerald-50 border-emerald-200' :
+                  toneSuggestion.type === 'good' ? 'bg-cyan-50 border-cyan-200' :
+                    toneSuggestion.type === 'needsWork' ? 'bg-amber-50 border-amber-200' :
+                      'bg-rose-50 border-rose-200'
+                  }`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{toneSuggestion.icon}</span>
+                    <span className={`text-xs font-bold ${toneSuggestion.type === 'excellent' ? 'text-emerald-600' :
+                      toneSuggestion.type === 'good' ? 'text-cyan-600' :
+                        toneSuggestion.type === 'needsWork' ? 'text-amber-600' :
+                          'text-rose-600'
+                      }`}>{toneSuggestion.message}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white/40 rounded-xl p-3 text-center border border-white/30">
+                  <p className="text-xs text-slate-500">開始演奏以獲得音色分析</p>
+                </div>
+              )}
+            </div>
+
+            {/* Instrument Selector - 移到泛音分析下方 */}
+            <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-4 md:p-6 shadow-sm">
+              <div className="mb-3">
+                <h3 className="text-base font-bold text-slate-700 mb-1">樂器選擇</h3>
+                <p className="text-[10px] text-slate-400 uppercase tracking-widest">Instrument</p>
               </div>
 
               <div className="space-y-2">
@@ -909,22 +1064,19 @@ function App() {
                     <button
                       key={instrument}
                       onClick={() => setSelectedInstrument(instrument)}
-                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${isSelected
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 ${isSelected
                         ? 'bg-gradient-to-r from-white/80 to-white/60 border-2 border-emerald-400 shadow-md'
                         : 'bg-white/40 hover:bg-white/60 border border-white/30'
                         }`}
                     >
-                      {/* Gradient Badge Icon */}
-                      <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${config.icon} flex items-center justify-center shadow-md`}>
-                        <span className="text-white font-black text-xs">{config.iconText}</span>
+                      <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${config.icon} flex items-center justify-center shadow-md`}>
+                        <span className="text-white font-black text-[10px]">{config.iconText}</span>
                       </div>
                       <div className="text-left flex-1">
-                        <div className={`text-sm font-bold ${isSelected ? 'text-emerald-700' : 'text-slate-700'
-                          }`}>{config.nameChinese}</div>
-                        <div className="text-xs text-slate-500">{config.name}</div>
+                        <div className={`text-sm font-bold ${isSelected ? 'text-emerald-700' : 'text-slate-700'}`}>{config.nameChinese}</div>
                       </div>
                       {isSelected && (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-emerald-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-emerald-500">
                           <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                         </svg>
                       )}
@@ -933,196 +1085,129 @@ function App() {
                 })}
               </div>
             </div>
-
-            {/* Harmonics / Tips */}
-            <div className="bg-gradient-to-b from-white/40 to-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-8 flex-1 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-700 mb-1">泛音分析</h3>
-                  <p className="text-xs text-slate-400 uppercase tracking-widest">Harmonic Analysis</p>
-                </div>
-                {toneQuality && (
-                  <div className="flex items-center gap-1 bg-white/50 px-4 py-2 rounded-full">
-                    <span className="text-sm font-bold text-slate-500">品質</span>
-                    <span className={`text-xl font-black ${toneQuality.overall >= 80 ? 'text-emerald-500' : toneQuality.overall >= 60 ? 'text-cyan-500' : 'text-amber-500'}`}>
-                      {toneQuality.overall}%
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex justify-center items-end gap-6 h-40 mb-4">
-                {/* Dynamic Theme Colors for Bars */}
-                {[
-                  { label: 'F1', val: harmonics?.f1, name: '基頻' },
-                  { label: 'F2', val: harmonics?.f2, name: '二次' },
-                  { label: 'F3', val: harmonics?.f3, name: '三次' }
-                ].map((bar, i) => (
-                  <div key={i} className="flex flex-col items-center gap-2 group">
-                    <div className="w-10 bg-white/40 rounded-full relative h-40 flex items-end overflow-hidden p-1 shadow-inner">
-                      <div
-                        className={`w-full rounded-full transition-all duration-300 ${theme === 'sunset' ? 'bg-gradient-to-t from-orange-400 to-rose-300' :
-                          theme === 'ocean' ? 'bg-gradient-to-t from-blue-500 to-teal-300' :
-                            'bg-gradient-to-t from-emerald-400 to-cyan-300'
-                          }`}
-                        style={{ height: `${Math.min(((bar.val || 0) / 255) * 100 * (1 + i * 0.4), 100)}%` }}
-                      ></div>
-                    </div>
-                    <span className="text-xs font-bold text-slate-400">{bar.label}</span>
-                    <span className="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">{bar.name}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Tone Quality Metrics */}
-              {toneQuality && (
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="bg-white/30 rounded-xl p-3 text-center">
-                    <div className="text-xs text-slate-500 font-bold uppercase">明亮度</div>
-                    <div className="text-xl font-black text-slate-600">{toneQuality.brightness}%</div>
-                  </div>
-                  <div className="bg-white/30 rounded-xl p-3 text-center">
-                    <div className="text-xs text-slate-500 font-bold uppercase">豐富度</div>
-                    <div className="text-xl font-black text-slate-600">{toneQuality.richness}%</div>
-                  </div>
-                  <div className="bg-white/30 rounded-xl p-3 text-center">
-                    <div className="text-xs text-slate-500 font-bold uppercase">平衡度</div>
-                    <div className="text-xl font-black text-slate-600">{toneQuality.balance}%</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Smart Suggestion */}
-              {toneSuggestion ? (
-                <div className={`rounded-2xl p-5 border ${toneSuggestion.type === 'excellent' ? 'bg-emerald-50 border-emerald-200' :
-                  toneSuggestion.type === 'good' ? 'bg-cyan-50 border-cyan-200' :
-                    toneSuggestion.type === 'needsWork' ? 'bg-amber-50 border-amber-200' :
-                      'bg-rose-50 border-rose-200'
-                  }`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-2xl">{toneSuggestion.icon}</span>
-                    <span className={`text-base font-bold ${toneSuggestion.type === 'excellent' ? 'text-emerald-600' :
-                      toneSuggestion.type === 'good' ? 'text-cyan-600' :
-                        toneSuggestion.type === 'needsWork' ? 'text-amber-600' :
-                          'text-rose-600'
-                      }`}>{toneSuggestion.message}</span>
-                  </div>
-                  {toneSuggestion.tip && (
-                    <p className="text-sm text-slate-600 leading-relaxed">{toneSuggestion.tip}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-white/40 rounded-2xl p-5 text-center border border-white/30">
-                  <p className="text-sm text-slate-500 leading-relaxed font-medium">
-                    "開始演奏以獲得音色分析與建議"
-                  </p>
-                </div>
-              )}
-            </div>
-
           </div>
+
+
+
+          {/* History Gallery Section */}
+          {
+            history.length > 0 && (
+              <div className="w-full pb-8">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold text-slate-700 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-400">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    歷史藝廊
+                  </h2>
+                  <button
+                    onClick={() => {
+                      if (confirm('確定要清除所有歷史紀錄嗎？')) {
+                        setHistory([]);
+                        localStorage.removeItem('aurora_history');
+                      }
+                    }}
+                    className="text-xs text-rose-500 hover:text-rose-600 font-bold px-3 py-1 bg-rose-50 rounded-full border border-rose-100 transition-colors"
+                  >
+                    清除全部
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {history.map((item) => (
+                    <div key={item.id} className="group relative bg-white/40 hover:bg-white/60 backdrop-blur-md border border-white/40 rounded-3xl p-5 transition-all duration-300 shadow-sm hover:shadow-md">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                            {new Date(item.timestamp).toLocaleDateString()}
+                          </span>
+                          <span className="text-xs font-mono text-slate-500">
+                            {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteHistoryItem(item.id)}
+                          className="text-slate-300 hover:text-rose-400 transition-colors p-1"
+                          title="刪除"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div className="flex items-end gap-4">
+                        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br ${theme === 'sunset' ? 'from-orange-100 to-rose-100 text-rose-600' :
+                          theme === 'ocean' ? 'from-blue-100 to-teal-100 text-teal-600' :
+                            'from-emerald-100 to-cyan-100 text-emerald-600'
+                          } shadow-inner`}>
+                          <span className="text-2xl font-black">{item.note.note}</span>
+                        </div>
+
+                        <div className="flex-1 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-slate-500 font-medium">音準偏差</span>
+                            <span className={`font-bold ${Math.abs(item.note.deviation) < 5 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                              {item.note.cents > 0 ? '+' : ''}{item.note.cents.toFixed(0)}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${Math.abs(item.note.deviation) < 5 ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                              style={{ width: `${Math.max(0, 100 - Math.abs(item.note.deviation) * 2)}%` }}
+                            ></div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
+                            <span className="text-slate-500 font-medium">共鳴度</span>
+                            <span className="font-bold text-indigo-500">{(item.harmonicsScore * 100).toFixed(0)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
         </div>
 
-        {/* History Gallery Section */}
-        {history.length > 0 && (
-          <div className="w-full pb-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-slate-700 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-400">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                </svg>
-                歷史藝廊
-              </h2>
-              <button
-                onClick={() => {
-                  if (confirm('確定要清除所有歷史紀錄嗎？')) {
-                    setHistory([]);
-                    localStorage.removeItem('aurora_history');
-                  }
-                }}
-                className="text-xs text-rose-500 hover:text-rose-600 font-bold px-3 py-1 bg-rose-50 rounded-full border border-rose-100 transition-colors"
-              >
-                清除全部
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {history.map((item) => (
-                <div key={item.id} className="group relative bg-white/40 hover:bg-white/60 backdrop-blur-md border border-white/40 rounded-3xl p-5 transition-all duration-300 shadow-sm hover:shadow-md">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                        {new Date(item.timestamp).toLocaleDateString()}
-                      </span>
-                      <span className="text-xs font-mono text-slate-500">
-                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteHistoryItem(item.id)}
-                      className="text-slate-300 hover:text-rose-400 transition-colors p-1"
-                      title="刪除"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  <div className="flex items-end gap-4">
-                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center bg-gradient-to-br ${theme === 'sunset' ? 'from-orange-100 to-rose-100 text-rose-600' :
-                      theme === 'ocean' ? 'from-blue-100 to-teal-100 text-teal-600' :
-                        'from-emerald-100 to-cyan-100 text-emerald-600'
-                      } shadow-inner`}>
-                      <span className="text-2xl font-black">{item.note.note}</span>
-                    </div>
-
-                    <div className="flex-1 space-y-2">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500 font-medium">音準偏差</span>
-                        <span className={`font-bold ${Math.abs(item.note.deviation) < 5 ? 'text-emerald-500' : 'text-amber-500'}`}>
-                          {item.note.cents > 0 ? '+' : ''}{item.note.cents.toFixed(0)}
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${Math.abs(item.note.deviation) < 5 ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                          style={{ width: `${Math.max(0, 100 - Math.abs(item.note.deviation) * 2)}%` }}
-                        ></div>
-                      </div>
-
-                      <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
-                        <span className="text-slate-500 font-medium">共鳴度</span>
-                        <span className="font-bold text-indigo-500">{(item.harmonicsScore * 100).toFixed(0)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
 
+
+        {/* Floating Practice Log Menu Button */}
+        <button
+          onClick={() => setShowPracticeLog(true)}
+          className={`fixed top-6 right-6 z-30 w-14 h-14 rounded-full bg-gradient-to-br ${theme === 'sunset' ? 'from-orange-400 to-rose-400' : theme === 'ocean' ? 'from-blue-400 to-teal-400' : 'from-emerald-400 to-cyan-400'} text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center group animate-float`}
+          title="練習日誌"
+        >
+          <TrebleClefIcon className="w-7 h-7" />
+          <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-rose-400 rounded-full animate-pulse" />
+        </button>
+
+        {/* Practice Log Panel */}
+        <PracticeLog
+          isOpen={showPracticeLog}
+          onClose={() => setShowPracticeLog(false)}
+          theme={theme}
+          currentToneQuality={toneQuality}
+        />
+
+        {/* 浮動分析按鈕 */}
+        {
+          !showPracticeLog && (
+            <button
+              onClick={() => setShowAnalyticsDashboard(true)}
+              className="fixed bottom-6 right-6 z-50 px-6 py-4 rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white shadow-2xl hover:shadow-purple-300/50 transition-all transform hover:scale-110 text-sm font-bold flex items-center gap-2"
+              title="開啟練習分析 (Ctrl+Shift+A)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+              </svg>
+              📊 練習分析
+            </button>
+          )
+        }
       </main>
-
-      {/* Floating Practice Log Menu Button */}
-      <button
-        onClick={() => setShowPracticeLog(true)}
-        className={`fixed top-6 right-6 z-30 w-14 h-14 rounded-full bg-gradient-to-br ${theme === 'sunset' ? 'from-orange-400 to-rose-400' : theme === 'ocean' ? 'from-blue-400 to-teal-400' : 'from-emerald-400 to-cyan-400'} text-white shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center group animate-float`}
-        title="練習日誌"
-      >
-        <TrebleClefIcon className="w-7 h-7" />
-        <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-rose-400 rounded-full animate-pulse" />
-      </button>
-
-      {/* Practice Log Panel */}
-      <PracticeLog
-        isOpen={showPracticeLog}
-        onClose={() => setShowPracticeLog(false)}
-        theme={theme}
-        currentToneQuality={toneQuality}
-      />
     </div>
   )
 }
