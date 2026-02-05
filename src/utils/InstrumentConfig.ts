@@ -2,7 +2,7 @@
  * 樂器配置 - 定義不同樂器的特性和音域
  */
 
-export type InstrumentType = 'vocal' | 'flute' | 'clarinet' | 'saxophone' | 'recorder' | 'ocarina' | 'chinese-flute';
+export type InstrumentType = 'vocal' | 'flute' | 'clarinet' | 'saxophone' | 'recorder' | 'ocarina' | 'chinese-flute' | 'harmonica';
 
 export interface InstrumentConfig {
     id: InstrumentType;
@@ -253,6 +253,38 @@ export const INSTRUMENT_CONFIGS: Record<InstrumentType, InstrumentConfig> = {
             breath: '氣流要有彈性變化，配合運氣技巧',
             embouchure: '風門大小要隨音高調整，注意角度',
             tone: '追求明亮穿透的音色，發揮笛膜共鳴'
+        }
+    },
+
+
+    // 口琴
+    harmonica: {
+        id: 'harmonica',
+        name: 'Harmonica',
+        nameChinese: '口琴',
+        icon: 'from-slate-400 to-blue-400',
+        iconText: 'HA',
+        monitoringMode: 'reed', // 口琴會遮住嘴巴，使用 reed 模式較適合（或不顯示嘴型）
+        range: {
+            min: 130,  // C3
+            max: 2093  // C7
+        },
+        optimalRange: {
+            min: 262,  // C4
+            max: 1047  // C6
+        },
+        toneCharacteristics: {
+            ideal: '甚至清晰、富有情感',
+            tips: [
+                '保持口腔空間',
+                '控制手部震音',
+                '注意單音清晰度'
+            ]
+        },
+        specificTips: {
+            breath: '使用腹式呼吸，氣流要穩定且深長',
+            embouchure: '嘴型像發"O"的音，將琴格含深一點以獲得飽滿音色',
+            tone: '追求清晰且富有共鳴的音色，善用手部製造哇音效果'
         }
     }
 };

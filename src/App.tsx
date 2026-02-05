@@ -31,9 +31,7 @@ function App() {
   // Device Controls
   const [showCamera, setShowCamera] = useState(true);
   const [micEnabled] = useState(true);
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+
 
   // Theme & UI
   const [theme] = useState<VisualizerTheme>('aurora');
